@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "GeoMirror",
-  "version": "1.0.0",
-  "description": "Mirror your visible IP's geolocation into the browser's HTML5 location API. Automatically picks a nearby residential street so navigator.geolocation always matches your exit IP.",
+  "version": "1.1.0",
+  "description": "Mirror your visible IP into the browser: spoof geolocation, timezone and language so geolocation, Date timezone offset, navigator.language and the Accept-Language header all match your exit IP.",
   "minimum_chrome_version": "111",
-  "permissions": ["storage", "alarms"],
+  "permissions": ["storage", "alarms", "declarativeNetRequest"],
   "host_permissions": [
     "https://reallyfreegeoip.org/*",
     "https://ipwho.is/*",
@@ -19,7 +19,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content-inject.js"],
+      "js": ["lib/timezone.js", "content-inject.js"],
       "world": "MAIN",
       "run_at": "document_start",
       "all_frames": true

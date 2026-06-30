@@ -1,66 +1,56 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GeoMirror</title>
+  <meta charset="UTF-8" />
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
   <header>
-    <div class="brand">
-      <img src="icons/icon48.png" alt="" class="logo" />
-      <div>
-        <h1>GeoMirror</h1>
-        <p class="tag">Make the browser's location match your IP</p>
-      </div>
+    <div id="status">
+      <span id="dot" class="dot"></span>
+      <span id="statusText">…</span>
     </div>
-    <label class="switch" title="Enable / disable the override">
-      <input type="checkbox" id="enabled" />
-      <span></span>
-    </label>
+    <button id="refresh">Refresh</button>
   </header>
 
-  <section class="status" id="status">
-    <span class="dot" id="dot"></span>
-    <span id="statusText">Loading…</span>
+  <section class="card">
+    <div class="row"><span>Exit IP</span><b id="ip">—</b></div>
+    <div class="row"><span>IP location</span><b id="ipLoc">—</b></div>
+    <div class="row"><span>ISP</span><b id="isp"></b></div>
+    <div class="row"><span>Spoofed address</span><b id="addr">—</b></div>
+    <div class="row"><span>Coordinates</span><b id="coords">—</b></div>
+    <div class="row"><span>Source</span><b id="source"></b></div>
+    <div class="row"><span>Spoofed timezone</span><b id="tz">—</b></div>
+    <div class="row"><span>Spoofed language</span><b id="lang">—</b></div>
+    <div class="row"><span>Updated</span><b id="updated">never</b></div>
   </section>
 
-  <div class="grid">
-    <div class="card">
-      <h2>Visible IP</h2>
-      <p class="big" id="ip">—</p>
-      <p class="sub" id="ipLoc">—</p>
-      <p class="muted" id="isp"></p>
-    </div>
-    <div class="card">
-      <h2>Reported location</h2>
-      <p class="big" id="addr">—</p>
-      <p class="sub" id="coords">—</p>
-      <p class="muted" id="source"></p>
-    </div>
-  </div>
+  <section class="card toggles">
+    <label class="toggle">
+      <span>Location spoof</span>
+      <input type="checkbox" id="enabled" />
+      <span class="switch"></span>
+    </label>
+    <label class="toggle">
+      <span>Timezone spoof</span>
+      <input type="checkbox" id="tzEnabled" />
+      <span class="switch"></span>
+    </label>
+    <label class="toggle">
+      <span>Language spoof</span>
+      <input type="checkbox" id="langEnabled" />
+      <span class="switch"></span>
+    </label>
+  </section>
 
-  <div class="actions">
-    <button id="refresh" class="primary">Refresh now</button>
-    <span class="muted" id="updated"></span>
-  </div>
-
-  <details class="advanced">
-    <summary>Advanced</summary>
-    <label>Reported accuracy (m)
-      <input type="number" id="accuracyM" min="5" max="500" step="5" />
-    </label>
-    <label>Auto-refresh interval (minutes)
-      <input type="number" id="refreshMinutes" min="30" max="10080" step="30" />
-    </label>
-    <label>ipinfo.io token (optional, improves fallback)
-      <input type="text" id="ipToken" placeholder="leave empty if unsure" />
-    </label>
-  </details>
+  <section class="card">
+    <div class="row"><label for="accuracyM">Accuracy (m)</label><input type="number" id="accuracyM" min="5" max="500" /></div>
+    <div class="row"><label for="refreshMinutes">Refresh (min)</label><input type="number" id="refreshMinutes" min="30" max="10080" /></div>
+    <div class="row"><label for="ipToken">ipinfo.io token (optional)</label><input type="text" id="ipToken" /></div>
+  </section>
 
   <footer>
-    <a href="https://github.com/Azurboy/geomirror" id="repoLink" target="_blank" rel="noopener">Source &amp; privacy</a>
+    <a href="https://github.com/Azurboy/geomirror" target="_blank" rel="noopener">GeoMirror</a>
   </footer>
 
   <script src="popup.js"></script>

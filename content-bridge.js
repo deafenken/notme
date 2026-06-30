@@ -5,6 +5,9 @@
  * where the MAIN-world injector can read it. MAIN-world scripts cannot access
  * chrome.storage, so this bridge is the only way to pass the coordinate across.
  *
+ * It now also publishes timezone + locale fields so the injector can spoof the
+ * Date timezone offset and navigator.language / Intl locale, not just coords.
+ *
  * It re-publishes on storage changes, so open pages pick up refreshes and
  * enable/disable toggles live.
  */
@@ -23,6 +26,11 @@
         lon: o ? o.lon : null,
         acc: o ? o.acc : (s.accuracyM || 30),
         ts: o ? o.ts : 0,
+        timezone: o ? o.timezone : null,
+        tzEnabled: s.tzEnabled !== false,
+        langEnabled: s.langEnabled !== false,
+        locale: o ? o.locale : null,
+        languages: o ? o.languages : null,
       };
       root.setAttribute('data-geomirror', JSON.stringify(payload));
     });

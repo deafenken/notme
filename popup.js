@@ -43,9 +43,17 @@ function render({ state, override, settings }) {
   $('source').textContent = st.overrideSource
     ? sourceLabel(st.overrideSource) + (st.overrideRoad ? ' · ' + st.overrideRoad : '')
     : '';
+
+  $('tz').textContent = (override && override.timezone) ? override.timezone
+    : (st.ipTimezone ? st.ipTimezone + ' (no override)' : '—');
+  $('lang').textContent = (override && override.locale) ? override.locale
+    : (st.ipLocale ? st.ipLocale + ' (no override)' : '—');
+
   $('updated').textContent = 'Updated ' + fmtTime(st.lastUpdated);
 
   $('enabled').checked = settings ? settings.enabled !== false : true;
+  $('tzEnabled').checked = settings ? settings.tzEnabled !== false : true;
+  $('langEnabled').checked = settings ? settings.langEnabled !== false : true;
   if (settings) {
     $('accuracyM').value = settings.accuracyM;
     $('refreshMinutes').value = settings.refreshMinutes;
@@ -72,6 +80,8 @@ function bind(id, key, map) {
 }
 
 bind('enabled', 'enabled');
+bind('tzEnabled', 'tzEnabled');
+bind('langEnabled', 'langEnabled');
 bind('accuracyM', 'accuracyM', (v) => Math.max(5, Math.min(500, +v || 30)));
 bind('refreshMinutes', 'refreshMinutes', (v) => Math.max(30, Math.min(10080, +v || 360)));
 bind('ipToken', 'ipToken', (v) => (v || '').trim());

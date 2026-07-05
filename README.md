@@ -1,8 +1,8 @@
-# GeoMirror
+# notme
 
 > Make your browser profile match your visible IP: geolocation, timezone, language, and `Accept-Language` — automatically, on every page.
 
-GeoMirror is a Chrome Manifest V3 extension for people who use proxies, VPNs, remote desktops, or regional network exits and want the browser-visible environment to be internally consistent.
+notme is a Chrome Manifest V3 extension for people who use proxies, VPNs, remote desktops, or regional network exits and want the browser-visible environment to be internally consistent.
 
 [中文说明](./README.zh-CN.md) · [Privacy policy](./PRIVACY.md) · [Technical notes](./docs/TECHNICAL.md)
 
@@ -22,13 +22,13 @@ Most people only change their **IP address**. Their browser still exposes signal
 - `navigator.language` / `navigator.languages` may reveal the host language.
 - the HTTP `Accept-Language` header may reveal another locale.
 
-That mismatch is exactly the kind of thing automated risk systems can use as a proxy/VPN/fraud signal. GeoMirror exists to close that gap.
+That mismatch is exactly the kind of thing automated risk systems can use as a proxy/VPN/fraud signal. notme exists to close that gap.
 
-## What GeoMirror does
+## What notme does
 
-GeoMirror detects your visible **exit IP**, derives a plausible browser profile from that IP, and applies it locally inside Chrome:
+notme detects your visible **exit IP**, derives a plausible browser profile from that IP, and applies it locally inside Chrome:
 
-| Surface | What GeoMirror changes |
+| Surface | What notme changes |
 | --- | --- |
 | HTML5 geolocation | Spoofs `navigator.geolocation` to a residential-looking coordinate near the exit IP, and returns a genuine `GeolocationPosition`. |
 | Geolocation permission | Reports geolocation permission as `granted` via a real `PermissionStatus`, to avoid permission-state mismatch. |
@@ -40,13 +40,14 @@ GeoMirror detects your visible **exit IP**, derives a plausible browser profile 
 | WebRTC IP leak | Optionally forces WebRTC through the proxy (`chrome.privacy` → `disable_non_proxied_udp`) so ICE candidates can't reveal the real, proxy-bypassing IP. |
 | Web Workers | Optionally (experimental, off by default) extends timezone + locale spoofing into dedicated Web Workers (where fingerprinters read the real timezone to bypass main-thread spoofing). |
 | CJK fonts | Optionally hides OS/region-revealing Chinese fonts (Microsoft YaHei, PingFang, SimSun, …, Simplified + Traditional) from canvas `measureText` and DOM width probes. |
-| Anti-detection | Spoofed functions report native to both `fn.toString()` and the intrinsic `Function.prototype.toString.call(fn)`; the override payload is not left in the DOM. |
+| Anti-detection | Spoofed functions report native to both `fn.toString()` and the intrinsic `Function.prototype.toString.call(fn)`; the override payload is not left in the DOM, and no global (like `window.GeoMirrorTZ`) is left for a page to probe. |
+| **Anthropic pages** | On `anthropic.com` / `claude.ai` / `claude.com` (and subdomains) the timezone, locale, and font protections are **forced on regardless of your toggles**, and the spoofed `Accept-Language` header is always sent — so information sent to Anthropic never leaks your real timezone/locale. |
 
 The goal is simple: if your IP looks like Tokyo, the browser should not still look like Shanghai, Los Angeles, or Berlin — and no single `Date` or `Intl` call should quietly give it away.
 
 ## Privacy model
 
-GeoMirror is local-first and auditable:
+notme is local-first and auditable:
 
 - No account.
 - No telemetry.
@@ -55,7 +56,7 @@ GeoMirror is local-first and auditable:
 - No remote configuration.
 - Computed overrides and settings are stored in `chrome.storage.local`.
 
-Important accuracy note: GeoMirror is not a zero-network extension. To match your current exit IP automatically, it must call explicitly listed public IP/geolocation/map APIs through Chrome’s network stack. These requests are limited to:
+Important accuracy note: notme is not a zero-network extension. To match your current exit IP automatically, it must call explicitly listed public IP/geolocation/map APIs through Chrome’s network stack. These requests are limited to:
 
 - detecting the exit IP location,
 - finding nearby residential roads,
@@ -66,7 +67,7 @@ It does not upload page content or browsing history. See [PRIVACY.md](./PRIVACY.
 ## How it works
 
 ```
-   proxy / VPN / remote exit          Chrome + GeoMirror
+   proxy / VPN / remote exit          Chrome + notme
               │                              │
               ▼                              ▼
         visible exit IP ───────► background service worker
@@ -106,21 +107,21 @@ Technical sequence:
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Click **Load unpacked**.
-5. Select the `geomirror` folder.
-6. Pin GeoMirror and click **Refresh** in the popup.
+5. Select the `notme` folder.
+6. Pin notme and click **Refresh** in the popup.
 
 ### Option B — load unpacked (Microsoft Edge)
 
-GeoMirror is a standard Chromium MV3 extension, so Edge loads it the same way:
+notme is a standard Chromium MV3 extension, so Edge loads it the same way:
 
 1. Download or clone this repository.
 2. Open `edge://extensions` (type it into the address bar).
 3. Toggle **Developer mode** on (bottom-left).
 4. Click **Load unpacked**.
-5. Select the `geomirror` folder (the one containing `manifest.json`).
-6. Pin GeoMirror from the puzzle-piece menu, open it, and click **Refresh**.
+5. Select the `notme` folder (the one containing `manifest.json`).
+6. Pin notme from the puzzle-piece menu, open it, and click **Refresh**.
 
-Edge honors the same `chrome.*` APIs GeoMirror uses (`declarativeNetRequest`, `alarms`, `privacy`), so all features work unchanged. If the popup shows an error, click **Refresh** once your proxy/VPN is connected.
+Edge honors the same `chrome.*` APIs notme uses (`declarativeNetRequest`, `alarms`, `privacy`), so all features work unchanged. If the popup shows an error, click **Refresh** once your proxy/VPN is connected.
 
 ### Option C — Chrome Web Store / Edge Add-ons
 
@@ -155,7 +156,7 @@ Useful public checks:
 - **Hide CJK fonts** — strip region-revealing Chinese fonts from canvas/DOM width probes so they read as not-installed. Default on.
 - **Spoof in Web Workers** *(experimental)* — extend timezone/locale spoofing into dedicated Web Workers. **Default off**, because it reloads worker code through a blob shim which can break WASM/bundled workers that rely on `self.location`. It probes for CSP `blob:` support and falls back to a native worker when blocked (so it won't silently kill workers), but enable it only if you need worker-level timezone hiding, and turn it off if a site's worker misbehaves.
 - **Reported accuracy (m)** — reported GPS accuracy, default 30 m.
-- **Auto-refresh interval (minutes)** — how often GeoMirror re-detects the exit IP.
+- **Auto-refresh interval (minutes)** — how often notme re-detects the exit IP.
 - **ipinfo.io token (optional)** — improves fallback reliability if you have a token.
 
 ## Why each permission
@@ -206,12 +207,12 @@ These were real gaps in earlier versions and are now closed:
 - **`Accept-Language` was silently not applied.** `declarativeNetRequest` `modifyHeaders` needs host access to the visited site; the old manifest only listed the IP-API domains, so the header rule was skipped on real sites. `host_permissions` is now `<all_urls>`, and the rule covers **all** resource types (previously only main-frame/sub-frame/XHR — images, fonts, scripts, and beacons leaked the real language).
 - **`Intl.DateTimeFormat` dropped the timezone** in the no-locale path (a positional-argument bug), leaking the host timezone whenever timezone spoofing ran with language spoofing off. Fixed.
 - **WebRTC could leak the real IP** around the proxy. Now optionally forced through the proxy.
-- **Spoof detection.** `Function.prototype.toString.call(fn)` used to return the wrapper source; the override payload sat readable in `<html data-geomirror>`; `permissions.query` returned a plain object. All fixed.
+- **Spoof detection.** `Function.prototype.toString.call(fn)` used to return the wrapper source; the override payload sat readable in `<html data-notme>`; `permissions.query` returned a plain object. All fixed.
 - **Opaque-origin frames.** `about:blank` / `srcdoc` / `data:` / `blob:` child frames are now patched (`match_origin_as_fallback`).
 
 ## Remaining limitations (honest list)
 
-- GeoMirror improves consistency of location/timezone/locale signals. It is **not** a complete anti-fingerprinting system: it does not touch canvas *pixel* readback, WebGL, audio, screen, or User-Agent (spoofing those inconsistently is often *more* detectable). Font hiding covers CJK-font *width* probing only.
+- notme improves consistency of location/timezone/locale signals. It is **not** a complete anti-fingerprinting system: it does not touch canvas *pixel* readback, WebGL, audio, screen, or User-Agent (spoofing those inconsistently is often *more* detectable). Font hiding covers CJK-font *width* probing only.
 - IP geolocation is approximate; the residential coordinate is a plausible nearby point, not your real address.
 - Locale inference is heuristic — IP providers do not know your real language, so it is derived from country code + timezone.
 - **Worker coverage is partial.** Classic dedicated Web Workers are now spoofed (via the "Spoof in Web Workers" toggle), but **Shared Workers, Service Workers, Worklets, and module workers still read the host timezone/locale** — a content script can't patch those scopes without breaking them.
@@ -223,7 +224,7 @@ These were real gaps in earlier versions and are now closed:
 Project layout:
 
 ```
-geomirror/
+notme/
 ├── manifest.json
 ├── background.js
 ├── content-bridge.js

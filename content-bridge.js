@@ -15,7 +15,7 @@
  * enable/disable toggles live.
  */
 (function () {
-  const MARK = '__geomirror__';
+  const MARK = '__nmb__';
 
   function publish() {
     chrome.storage.local.get(['override', 'settings'], (data) => {

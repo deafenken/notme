@@ -1,11 +1,11 @@
 # Privacy Policy
 
-GeoMirror is designed to be minimal and auditable. This page describes exactly
+notme is designed to be minimal and auditable. This page describes exactly
 what data the extension touches, where it goes, and where it does **not** go.
 
 ## The short version
 
-GeoMirror makes **no requests to any server it does not need**, sends **no
+notme makes **no requests to any server it does not need**, sends **no
 telemetry**, collects **no analytics**, and shares data with **no third party
 other than the four geolocation services listed below** — which it contacts only
 to do its job, and only with the minimum information required.

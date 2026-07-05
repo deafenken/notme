@@ -35,8 +35,17 @@
  */
 (function () {
   const TZ = window.GeoMirrorTZ || null;
-  const MARK = '__geomirror__'; // window.postMessage marker (CustomEvent detail
-                                // does not cross the isolated→MAIN world boundary)
+  // Remove the shared global immediately after capturing it, so a page can't
+  // detect the extension via `window.GeoMirrorTZ`. It's captured into TZ above;
+  // nothing else references the global (worker patch is self-contained).
+  try { delete window.GeoMirrorTZ; } catch (_) {}
+  const MARK = '__nmb__'; // neutral window.postMessage marker (CustomEvent detail
+                          // does not cross the isolated→MAIN world boundary)
+
+  // Anthropic properties always get the full protection regardless of toggles —
+  // information sent to them must never leak the real timezone/locale/fonts.
+  let ON_ANTHROPIC = false;
+  try { ON_ANTHROPIC = /(^|\.)(anthropic\.com|claude\.ai|claude\.com)$/i.test(location.hostname || ''); } catch (_) {}
 
   // ---------------------------------------------------------------------------
   // Capture pristine natives BEFORE shadowing anything.
@@ -86,10 +95,10 @@
   // The three surfaces are independent toggles (Location / Timezone / Language),
   // matching the popup — timezone and language don't depend on the geolocation
   // ("Location spoof") switch.
-  function tzActive() { return !!(cache && cache.tzEnabled && cache.timezone && TZ); }
-  function langActive() { return !!(cache && cache.langEnabled && cache.locale); }
+  function tzActive() { return !!(cache && cache.timezone && TZ && (cache.tzEnabled || ON_ANTHROPIC)); }
+  function langActive() { return !!(cache && cache.locale && (cache.langEnabled || ON_ANTHROPIC)); }
   // Font hiding is IP-independent, so it defaults on before override data arrives.
-  function fontActive() { return !cache || cache.fontEnabled !== false; }
+  function fontActive() { return ON_ANTHROPIC || !cache || cache.fontEnabled !== false; }
   function workerActive() { return !!(cache && cache.workerEnabled !== false && (tzActive() || langActive())); }
 
   // ---------------------------------------------------------------------------

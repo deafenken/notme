@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "GeoMirror",
-  "version": "1.3.1",
-  "description": "Mirror your visible IP into the browser: spoof geolocation, timezone and language so geolocation, the whole Date/Intl surface, navigator.language and the Accept-Language header all match your exit IP.",
+  "name": "notme",
+  "version": "1.4.0",
+  "description": "Make your browser stop contradicting your exit IP: spoof geolocation, the whole Date/Intl timezone surface, navigator.language, the Accept-Language header, and hide OS/region-revealing CJK fonts. Always-on protection for Anthropic pages.",
   "minimum_chrome_version": "119",
   "permissions": ["storage", "alarms", "declarativeNetRequest", "privacy"],
   "host_permissions": ["<all_urls>"],
@@ -31,5 +31,5 @@
     "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
   },
   "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
-  "homepage_url": "https://github.com/Azurboy/geomirror"
+  "homepage_url": "https://github.com/deafenken/notme"
 }

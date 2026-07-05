@@ -1,8 +1,8 @@
-# GeoMirror technical notes
+# notme technical notes
 
 ## Purpose
 
-GeoMirror aligns the browser-visible profile with the current proxy/VPN exit IP. It does not change the network IP itself; it changes browser surfaces that otherwise commonly contradict the proxy location.
+notme aligns the browser-visible profile with the current proxy/VPN exit IP. It does not change the network IP itself; it changes browser surfaces that otherwise commonly contradict the proxy location.
 
 The extension currently spoofs:
 
@@ -84,12 +84,12 @@ When "Block WebRTC IP leak" is on, the service worker sets
 `chrome.privacy.network.webRTCIPHandlingPolicy` to `disable_non_proxied_udp`.
 This forces WebRTC to use the proxy path; if the proxy has no UDP relay, WebRTC
 media fails to connect rather than leaking the real IP. Extension-controlled
-privacy settings revert automatically when GeoMirror is disabled or removed.
+privacy settings revert automatically when notme is disabled or removed.
 
 ## Web Worker spoofing ("Spoof in Web Workers" toggle — experimental, default OFF)
 
 Content scripts don't run inside worker scopes, so a fingerprinter can read the
-real timezone/locale from a `new Worker(...)`. When enabled, GeoMirror wraps the
+real timezone/locale from a `new Worker(...)`. When enabled, notme wraps the
 `Worker` constructor: for a classic dedicated worker it builds a small blob whose
 body (1) runs a self-contained patch of `Date` (offset, local getters, string
 methods, `toLocale*`) / `Intl` / `navigator` for the spoofed zone/locale,
@@ -102,7 +102,7 @@ blob has boundaries a shim can't fully paper over:
 
 - **CSP.** A policy that omits `blob:` (e.g. `script-src 'self'`) blocks the blob
   worker *asynchronously* — the constructor doesn't throw, so a try/catch can't
-  catch it. To avoid silently killing the worker, GeoMirror runs a one-shot probe
+  catch it. To avoid silently killing the worker, notme runs a one-shot probe
   worker and only takes the blob path once blob workers are **confirmed** to run
   on the page; until then (and permanently on CSP-restricted pages) workers pass
   through natively (unspoofed but working).
@@ -121,7 +121,7 @@ if a specific site's worker misbehaves, turn the toggle off.
 
 Width-based font probes render a string in `"'TestFont', <generic>"` and compare
 the measured width against the generic baseline; an installed font shifts the
-width. GeoMirror patches `CanvasRenderingContext2D.measureText` (and the
+width. notme patches `CanvasRenderingContext2D.measureText` (and the
 offscreen variant) plus `Element.getBoundingClientRect`/`getClientRects` and
 `HTMLElement.offsetWidth`/`offsetHeight`: when the measured font-family names a
 blacklisted CJK font (Microsoft YaHei, PingFang, SimSun, SimHei, KaiTi, MingLiU,
@@ -130,6 +130,31 @@ stripped before measuring, so the probe reads the generic baseline and concludes
 the font is not installed. This hides the OS/region signal (a Windows/macOS
 Chinese font set contradicting, say, a Los Angeles exit IP). The DOM path only
 acts on elements that declare a CJK font inline, so normal layout is untouched.
+
+## Always-on protection for Anthropic
+
+Because the motivating concern is Anthropic reading the real OS timezone, the
+timezone / locale / font protections are forced on for Anthropic properties
+regardless of the popup toggles:
+
+- **Content script.** `content-inject.js` sets `ON_ANTHROPIC` when
+  `location.hostname` matches `anthropic.com`, `claude.ai`, or `claude.com`
+  (or a subdomain). `tzActive()` / `langActive()` / `fontActive()` then treat
+  the feature as enabled even if the corresponding toggle is off (timezone and
+  locale still require override data to have a value to spoof to).
+- **Header.** `background.js` installs a second, higher-priority
+  `declarativeNetRequest` rule (`requestDomains` = those domains) that always
+  sets the spoofed `Accept-Language` on requests to Anthropic, independent of the
+  language toggle.
+
+The experimental Web Worker feature is *not* force-enabled on Anthropic
+(claude.ai is worker-heavy and the blob rewrite could break it); the main-thread
+protections cover what the page's own JavaScript reads.
+
+Extension-presence hygiene: the shared `window.GeoMirrorTZ` global is deleted
+immediately after the injector captures it, and the isolated↔MAIN channel uses a
+neutral `window.postMessage` marker, so a page can't trivially detect the
+extension by a well-known global or attribute.
 
 ## Limitations
 

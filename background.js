@@ -27,7 +27,11 @@ const DEFAULT_SETTINGS = {
 };
 
 const ALARM = 'refresh';
-const AL_RULE_ID = 9001; // dynamic declarativeNetRequest rule id for Accept-Language
+const AL_RULE_ID = 9001;           // global Accept-Language rule (when langEnabled)
+const AL_ANTHROPIC_RULE_ID = 9002; // always-on Accept-Language rule for Anthropic
+// Anthropic properties always get the spoofed Accept-Language regardless of the
+// language toggle (requestDomains matches these domains and their subdomains).
+const ANTHROPIC_DOMAINS = ['anthropic.com', 'claude.ai', 'claude.com'];
 
 // Apply the Accept-Language override to every request type. Omitting resource
 // types (or listing only a subset) leaves images/scripts/fonts/beacons sending
@@ -58,27 +62,22 @@ async function syncHeaderRule(settings, override) {
   if (!chrome.declarativeNetRequest) return;
   try {
     await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: [AL_RULE_ID],
+      removeRuleIds: [AL_RULE_ID, AL_ANTHROPIC_RULE_ID],
     });
-    if (!(settings && settings.langEnabled)) return;
-    let al = override && override.acceptLanguage;
+    const al = override && override.acceptLanguage;
     if (!al) return; // nothing to enforce yet
-    await chrome.declarativeNetRequest.updateDynamicRules({
-      addRules: [{
-        id: AL_RULE_ID,
-        priority: 1,
-        action: {
-          type: 'modifyHeaders',
-          requestHeaders: [
-            { header: 'accept-language', operation: 'set', value: al },
-          ],
-        },
-        condition: {
-          urlFilter: '*',
-          resourceTypes: AL_RESOURCE_TYPES,
-        },
-      }],
-    });
+    const action = {
+      type: 'modifyHeaders',
+      requestHeaders: [{ header: 'accept-language', operation: 'set', value: al }],
+    };
+    const rules = [];
+    // Global rule, gated by the language toggle.
+    if (settings && settings.langEnabled) {
+      rules.push({ id: AL_RULE_ID, priority: 1, action, condition: { urlFilter: '*', resourceTypes: AL_RESOURCE_TYPES } });
+    }
+    // Always-on rule for Anthropic domains, independent of the toggle.
+    rules.push({ id: AL_ANTHROPIC_RULE_ID, priority: 2, action, condition: { requestDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
+    await chrome.declarativeNetRequest.updateDynamicRules({ addRules: rules });
   } catch (_) { /* DNR may be unavailable on some builds; fail soft */ }
 }
 

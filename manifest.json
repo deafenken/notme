@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "notme",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Make your browser stop contradicting your exit IP: spoof geolocation, the whole Date/Intl timezone surface, navigator.language, the Accept-Language header, and hide OS/region-revealing CJK fonts. Always-on protection for Anthropic pages.",
   "minimum_chrome_version": "119",
   "permissions": [

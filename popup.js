@@ -28,7 +28,7 @@ function render({ state, override, settings }) {
     txt.textContent = 'Active';
   } else if (st.status === 'manual') {
     dot.className = 'dot ok';
-    txt.textContent = 'Active · manual timezone';
+    txt.textContent = st.mismatch ? 'Active · forced TZ (≠ exit IP)' : 'Active · forced timezone';
   } else {
     dot.className = 'dot err';
     txt.textContent = st.lastError ? ('Error: ' + st.lastError)
@@ -48,7 +48,7 @@ function render({ state, override, settings }) {
     ? sourceLabel(st.overrideSource) + (st.overrideRoad ? ' · ' + st.overrideRoad : '')
     : '';
 
-  const tzSrc = (st.tzSource === 'manual' || st.status === 'manual') ? ' · manual'
+  const tzSrc = (st.tzSource === 'manual' || st.status === 'manual') ? ' · forced'
     : (st.tzSource === 'ip' ? ' · detected' : '');
   $('tz').textContent = (override && override.timezone) ? override.timezone + tzSrc
     : (st.ipTimezone ? st.ipTimezone + ' (no override)' : '—');
@@ -76,7 +76,7 @@ function render({ state, override, settings }) {
   const sel = $('manualTz');
   if (!sel || !window.TZData) return;
   const none = document.createElement('option');
-  none.value = ''; none.textContent = '— Auto only (no fallback) —';
+  none.value = ''; none.textContent = 'Auto — use exit IP';
   sel.appendChild(none);
   for (const tz of TZData.TZ_ORDER) {
     const o = document.createElement('option');

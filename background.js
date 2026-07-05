@@ -136,8 +136,31 @@ async function refresh() {
   await patchState({ status: 'refreshing', lastError: null });
   const s = await getSettings();
   const now = Date.now();
+
+  // A manually chosen timezone is FORCED: it overrides exit-IP detection so you
+  // can present a fixed non-China profile even when the exit IP resolves to China
+  // (or detection fails). Auto-detection runs only when the manual zone is blank.
+  if (s.manualTz) {
+    const { override, state } = buildManualOverride(s, now, null);
+    // Best-effort: still look up the real exit IP so the popup can show it (and
+    // flag when the forced timezone contradicts the real exit location).
+    try {
+      const ip = await IPLoc.getIPLocation(s.ipToken);
+      if (ip && ip.ip) {
+        state.ip = ip.ip; state.ipCity = ip.city; state.ipRegion = ip.region;
+        state.ipCountry = ip.country; state.isp = ip.isp; state.provider = ip.provider;
+        state.realTimezone = ip.timezone || null;
+        state.mismatch = !!(ip.timezone && ip.timezone !== s.manualTz);
+      }
+    } catch (_) {}
+    await chrome.storage.local.set({ override, state });
+    await syncHeaderRule(s, override);
+    await syncWebRTC(s);
+    return;
+  }
+
   try {
-    // Exit-IP detection is the priority — it confirms the real proxy timezone.
+    // Exit-IP detection confirms the real proxy timezone.
     const ip = await IPLoc.getIPLocation(s.ipToken);
     if (!ip || ip.lat == null) throw new Error('All IP geolocation providers failed.');
 
@@ -146,10 +169,7 @@ async function refresh() {
     });
     const addr = await IPLoc.getDisplayAddress(pick.lat, pick.lon);
 
-    // Prefer the provider's IANA timezone. If the provider omitted it, fall back
-    // to the user's manual timezone rather than leaking the real one.
-    const timezone = ip.timezone || s.manualTz || null;
-    const tzSource = ip.timezone ? 'ip' : (s.manualTz ? 'manual' : 'none');
+    const timezone = ip.timezone || null;
     const loc = Locale.localeFor(ip.countryCode, timezone);
 
     const override = {
@@ -168,7 +188,7 @@ async function refresh() {
       ip: ip.ip, ipCity: ip.city, ipRegion: ip.region,
       ipCountry: ip.country, ipCountryCode: ip.countryCode,
       ipLat: ip.lat, ipLon: ip.lon, isp: ip.isp, provider: ip.provider,
-      ipTimezone: timezone, tzSource,
+      ipTimezone: timezone, tzSource: timezone ? 'ip' : 'none',
       ipLocale: loc ? loc.language : null,
       overrideLat: pick.lat, overrideLon: pick.lon,
       overrideSource: pick.source, overrideRoad: pick.road || null,
@@ -179,16 +199,7 @@ async function refresh() {
     await syncHeaderRule(s, override);
     await syncWebRTC(s);
   } catch (e) {
-    const err = String((e && e.message) || e);
-    if (s.manualTz) {
-      // Detection failed but the user set a manual timezone — use it.
-      const { override, state } = buildManualOverride(s, now, 'Exit-IP detection failed; using manual timezone. (' + err + ')');
-      await chrome.storage.local.set({ override, state });
-      await syncHeaderRule(s, override);
-      await syncWebRTC(s);
-    } else {
-      await patchState({ status: 'error', lastError: err, lastUpdated: now });
-    }
+    await patchState({ status: 'error', lastError: String((e && e.message) || e), lastUpdated: now });
   }
 }
 

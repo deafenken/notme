@@ -202,7 +202,7 @@ navigator.geolocation.getCurrentPosition(console.log, console.error)
 - **Block WebRTC IP leak**：强制 WebRTC 走代理，让 ICE candidate 无法暴露真实 IP。默认开启。如果你在没有 UDP 中继的代理上使用视频通话等 WebRTC 功能，可关闭它 —— 开启时这类通话可能连不上，但不会泄露真实 IP。
 - **Hide CJK fonts**：把暴露操作系统/地区的中文字体(微软雅黑、苹方、宋体、黑体…简繁都含)从 canvas `measureText` 和 DOM 宽度探测里剥掉，让它们读起来像"未安装"。默认开启。
 - **Spoof in Web Workers（实验性）**：把时区/语言伪装扩展到专用 Web Worker(指纹站常在 worker 里读真实时区来绕过主线程伪装)。**默认关闭** —— 它通过 blob 垫片重新加载 worker 代码,可能破坏依赖 `self.location` 的 WASM/打包 worker。它会探测 CSP 是否允许 `blob:`,被拦时回退到原生 worker(不会静默弄坏 worker),但请仅在你确实需要 worker 级时区隐藏时开启;某站点 worker 出问题就关掉它。
-- **Manual timezone (fallback)**：始终**优先自动探测出口 IP**,探测成功就用探测到的时区。若探测**失败**(或 provider 没返回时区),则改用这里选的时区、语言和该时区的代表坐标 —— 保证你不会被暴露真实时区。留在 *Auto only* 则仅靠自动探测。（选一个后会立即重新探测并生效。）
+- **Force timezone（强制时区）**：选一个时区就会**完全覆盖出口 IP 探测** —— 时区、语言、代表坐标都强制用你选的这个,不管出口 IP 探测到哪里、也不管探测是否成功。用它来呈现一个固定的非中国环境。留在 *Auto — use exit IP* 则跟随探测到的出口 IP。（选一个后立即生效。）**注意:** 强制一个和你真实出口 IP 不一致的时区,只能骗过**浏览器侧**的检测(比如 fuck-claude 读的是 `Intl` 时区,这个能改);如果对方在**服务器端读你的出口 IP** 再和浏览器时区比对,仍会看到 IP↔时区不一致 —— 那种情况唯一的真正解法是用一个真的从目标地区出口的代理。
 - **Accuracy (m)**：上报给页面的定位精度，默认 30 米。
 - **Refresh (min)**：重新检测出口 IP 的间隔。
 - **ipinfo.io token（可选）**：有 token 时可提升 fallback 稳定性。

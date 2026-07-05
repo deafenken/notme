@@ -509,19 +509,36 @@
     '思源黑体', '思源宋体', 'source han sans', 'source han serif',
     'noto sans cjk', 'noto serif cjk', 'noto sans sc', 'noto serif sc', 'noto sans tc', 'noto serif tc',
     'wenquanyi', '文泉驿', 'hiragino sans gb', '幼圆', 'youyuan',
+    // Domestic vendor / software fonts (MiSans, HarmonyOS, OPPO, vivo, HONOR,
+    // Alibaba, HanYi, Founder/方正) — a strong "China" signal on their own.
+    'misans', 'miui', '小米兰亭', 'mi lanting',
+    'harmonyos sans', 'harmonyos', '鸿蒙', 'honor sans',
+    'oppo sans', 'vivo sans',
+    'alibaba puhuiti', 'alibaba sans', '阿里巴巴普惠体', 'dingtalk', '钉钉进步体',
+    'hyqihei', '汉仪', '方正', 'fzhei', 'fzsong', 'fzkai', 'fzlanting',
   ];
-  function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-  const CJK_RE = new RegExp('([\'"]?)(' + FONT_BLACKLIST.map(escRe).join('|') + ')\\1\\s*,?', 'gi');
-  // Returns a font/family string with the blacklisted CJK families removed, or
-  // null when the input contains none (so callers can cheaply skip).
+  const SIZE_RE = /^(.*?\d*\.?\d+(?:px|pt|pc|em|rem|ex|ch|vw|vh|vmin|vmax|%|cm|mm|in|q)\b)\s*(.*)$/i;
+  // Return the font string with any WHOLE family that names a blacklisted CJK /
+  // vendor font removed (keeping the size prefix and the surviving families), or
+  // null when none is present. Whole-family matching avoids leaving fragments
+  // (e.g. "HarmonyOS Sans SC" -> "SC") and avoids false positives from tokens
+  // embedded in unrelated names (e.g. "Founders Grotesk").
   function stripCJK(fontStr) {
     if (!fontStr) return null;
-    const lower = ('' + fontStr).toLowerCase();
+    const s = '' + fontStr;
+    const lower = s.toLowerCase();
     let hit = false;
     for (let i = 0; i < FONT_BLACKLIST.length; i++) { if (lower.indexOf(FONT_BLACKLIST[i]) >= 0) { hit = true; break; } }
     if (!hit) return null;
-    let out = ('' + fontStr).replace(CJK_RE, '').replace(/,\s*,/g, ',').replace(/,\s*$/, '').replace(/^\s*,/, '').replace(/\s+/g, ' ').trim();
-    return out;
+    const m = s.match(SIZE_RE);
+    const prefix = m ? m[1] : '';
+    const familyStr = m ? m[2] : s;
+    const kept = familyStr.split(',').map((f) => f.trim()).filter(Boolean).filter((f) => {
+      const fl = f.replace(/^['"]|['"]$/g, '').toLowerCase();
+      return !FONT_BLACKLIST.some((x) => fl.indexOf(x) >= 0);
+    });
+    const fam = kept.length ? kept.join(', ') : 'sans-serif';
+    return (prefix ? prefix + ' ' : '') + fam;
   }
 
   // Set ctx.font, retrying with an appended generic if a family-less strip result

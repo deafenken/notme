@@ -26,9 +26,13 @@ function render({ state, override, settings }) {
   } else if (ok) {
     dot.className = 'dot ok';
     txt.textContent = 'Active';
+  } else if (st.status === 'manual') {
+    dot.className = 'dot ok';
+    txt.textContent = 'Active · manual timezone';
   } else {
     dot.className = 'dot err';
-    txt.textContent = st.lastError ? ('Error: ' + st.lastError) : 'Error';
+    txt.textContent = st.lastError ? ('Error: ' + st.lastError)
+      : 'Detection failed — pick a manual timezone below';
   }
 
   $('ip').textContent = st.ip || '—';
@@ -44,7 +48,9 @@ function render({ state, override, settings }) {
     ? sourceLabel(st.overrideSource) + (st.overrideRoad ? ' · ' + st.overrideRoad : '')
     : '';
 
-  $('tz').textContent = (override && override.timezone) ? override.timezone
+  const tzSrc = (st.tzSource === 'manual' || st.status === 'manual') ? ' · manual'
+    : (st.tzSource === 'ip' ? ' · detected' : '');
+  $('tz').textContent = (override && override.timezone) ? override.timezone + tzSrc
     : (st.ipTimezone ? st.ipTimezone + ' (no override)' : '—');
   $('lang').textContent = (override && override.locale) ? override.locale
     : (st.ipLocale ? st.ipLocale + ' (no override)' : '—');
@@ -61,8 +67,23 @@ function render({ state, override, settings }) {
     $('accuracyM').value = settings.accuracyM;
     $('refreshMinutes').value = settings.refreshMinutes;
     $('ipToken').value = settings.ipToken || '';
+    $('manualTz').value = settings.manualTz || '';
   }
 }
+
+// Populate the manual-timezone dropdown once (from lib/tzdata.js).
+(function populateManualTz() {
+  const sel = $('manualTz');
+  if (!sel || !window.TZData) return;
+  const none = document.createElement('option');
+  none.value = ''; none.textContent = '— Auto only (no fallback) —';
+  sel.appendChild(none);
+  for (const tz of TZData.TZ_ORDER) {
+    const o = document.createElement('option');
+    o.value = tz; o.textContent = TZData.TZ_PROFILES[tz].label;
+    sel.appendChild(o);
+  }
+})();
 
 function send(msg) {
   return new Promise((res) => chrome.runtime.sendMessage(msg, res));
@@ -91,6 +112,19 @@ bind('workerEnabled', 'workerEnabled');
 bind('accuracyM', 'accuracyM', (v) => Math.max(5, Math.min(500, +v || 30)));
 bind('refreshMinutes', 'refreshMinutes', (v) => Math.max(30, Math.min(10080, +v || 360)));
 bind('ipToken', 'ipToken', (v) => (v || '').trim());
+
+// Manual timezone: save, then re-detect so it applies immediately (IP detection
+// still wins when it succeeds; the manual value is the fallback).
+$('manualTz').addEventListener('change', async (e) => {
+  if (busy) return;
+  busy = true;
+  $('dot').className = 'dot busy';
+  $('statusText').textContent = 'Updating…';
+  await send({ type: 'SET_SETTINGS', patch: { manualTz: e.target.value || '' } });
+  await send({ type: 'REFRESH' });
+  busy = false;
+  await load();
+});
 
 $('refresh').addEventListener('click', async () => {
   if (busy) return;

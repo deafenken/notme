@@ -59,6 +59,7 @@
   </section>
 
   <section class="card">
+    <div class="row"><label for="manualTz">Manual timezone (fallback)</label><select id="manualTz"></select></div>
     <div class="row"><label for="accuracyM">Accuracy (m)</label><input type="number" id="accuracyM" min="5" max="500" /></div>
     <div class="row"><label for="refreshMinutes">Refresh (min)</label><input type="number" id="refreshMinutes" min="30" max="10080" /></div>
     <div class="row"><label for="ipToken">ipinfo.io token (optional)</label><input type="text" id="ipToken" /></div>
@@ -68,6 +69,7 @@
     <a href="https://github.com/deafenken/notme" target="_blank" rel="noopener">notme</a>
   </footer>
 
+  <script src="lib/tzdata.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

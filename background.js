@@ -10,7 +10,7 @@
  *    *outgoing* HTTP header matches the spoofed language, not just navigator.
  *  - Refresh on install / startup and on demand (one-tap re-detect).
  */
-importScripts('lib/geo.js', 'lib/providers.js', 'lib/locale.js');
+importScripts('lib/geo.js', 'lib/providers.js', 'lib/locale.js', 'lib/tzdata.js');
 
 const DEFAULT_SETTINGS = {
   enabled: true,
@@ -24,6 +24,8 @@ const DEFAULT_SETTINGS = {
   workerEnabled: false,   // (experimental) spoof inside Web Workers — off by default:
                           // rewriting a worker through a blob can break WASM/bundled
                           // workers that rely on self.location. Opt in if you need it.
+  manualTz: '',           // fallback IANA timezone used when exit-IP detection fails
+                          // (or a provider returns no timezone). Empty = auto only.
 };
 
 const ALARM = 'refresh';
@@ -101,10 +103,41 @@ async function syncWebRTC(settings) {
   } catch (_) { /* privacy API may be restricted; fail soft */ }
 }
 
+/** Build an override from the user's manual timezone (fallback when the exit-IP
+ *  path can't confirm a timezone). Coordinates come from the timezone's profile
+ *  city (jittered) so geolocation stays consistent; locale is inferred the same
+ *  way as the auto path. */
+function buildManualOverride(s, now, note) {
+  const prof = TZData.profileForTz(s.manualTz);
+  const j = (prof.lat != null) ? GeoUtil.jitterCoord(prof.lat, prof.lon, 300, 1500) : null;
+  const loc = Locale.localeFor(prof.cc, s.manualTz);
+  const override = {
+    lat: j ? j.lat : null, lon: j ? j.lon : null, acc: s.accuracyM,
+    source: 'manual', road: null, enabled: s.enabled, ts: now,
+    timezone: s.manualTz, tzEnabled: s.tzEnabled, langEnabled: s.langEnabled,
+    locale: loc ? loc.language : null,
+    languages: loc ? loc.languages : null,
+    acceptLanguage: loc ? loc.acceptLanguage : null,
+  };
+  const state = {
+    status: 'manual',
+    ip: null, ipCity: null, ipRegion: null, ipCountry: null, ipCountryCode: prof.cc,
+    ipLat: null, ipLon: null, isp: null, provider: null,
+    ipTimezone: s.manualTz, tzSource: 'manual', ipLocale: loc ? loc.language : null,
+    overrideLat: override.lat, overrideLon: override.lon,
+    overrideSource: 'manual', overrideRoad: null,
+    overrideAddress: prof.label || s.manualTz,
+    lastUpdated: now, lastError: note || null,
+  };
+  return { override, state };
+}
+
 async function refresh() {
   await patchState({ status: 'refreshing', lastError: null });
   const s = await getSettings();
+  const now = Date.now();
   try {
+    // Exit-IP detection is the priority — it confirms the real proxy timezone.
     const ip = await IPLoc.getIPLocation(s.ipToken);
     if (!ip || ip.lat == null) throw new Error('All IP geolocation providers failed.');
 
@@ -112,12 +145,11 @@ async function refresh() {
       radius: 2500, limit: 150, timeoutMs: 12000,
     });
     const addr = await IPLoc.getDisplayAddress(pick.lat, pick.lon);
-    const now = Date.now();
 
-    // Timezone: prefer the provider's IANA name; fall back to looking it up is
-    // not needed — IP providers already return city-level tz. If a provider
-    // omitted it, downstream just keeps the real tz.
-    const timezone = ip.timezone || null;
+    // Prefer the provider's IANA timezone. If the provider omitted it, fall back
+    // to the user's manual timezone rather than leaking the real one.
+    const timezone = ip.timezone || s.manualTz || null;
+    const tzSource = ip.timezone ? 'ip' : (s.manualTz ? 'manual' : 'none');
     const loc = Locale.localeFor(ip.countryCode, timezone);
 
     const override = {
@@ -136,7 +168,7 @@ async function refresh() {
       ip: ip.ip, ipCity: ip.city, ipRegion: ip.region,
       ipCountry: ip.country, ipCountryCode: ip.countryCode,
       ipLat: ip.lat, ipLon: ip.lon, isp: ip.isp, provider: ip.provider,
-      ipTimezone: timezone,
+      ipTimezone: timezone, tzSource,
       ipLocale: loc ? loc.language : null,
       overrideLat: pick.lat, overrideLon: pick.lon,
       overrideSource: pick.source, overrideRoad: pick.road || null,
@@ -147,11 +179,16 @@ async function refresh() {
     await syncHeaderRule(s, override);
     await syncWebRTC(s);
   } catch (e) {
-    await patchState({
-      status: 'error',
-      lastError: String((e && e.message) || e),
-      lastUpdated: Date.now(),
-    });
+    const err = String((e && e.message) || e);
+    if (s.manualTz) {
+      // Detection failed but the user set a manual timezone — use it.
+      const { override, state } = buildManualOverride(s, now, 'Exit-IP detection failed; using manual timezone. (' + err + ')');
+      await chrome.storage.local.set({ override, state });
+      await syncHeaderRule(s, override);
+      await syncWebRTC(s);
+    } else {
+      await patchState({ status: 'error', lastError: err, lastUpdated: now });
+    }
   }
 }
 

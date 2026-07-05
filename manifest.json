@@ -1,24 +1,42 @@
 {
   "manifest_version": 3,
   "name": "notme",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Make your browser stop contradicting your exit IP: spoof geolocation, the whole Date/Intl timezone surface, navigator.language, the Accept-Language header, and hide OS/region-revealing CJK fonts. Always-on protection for Anthropic pages.",
   "minimum_chrome_version": "119",
-  "permissions": ["storage", "alarms", "declarativeNetRequest", "privacy"],
-  "host_permissions": ["<all_urls>"],
-  "background": { "service_worker": "background.js" },
+  "permissions": [
+    "storage",
+    "alarms",
+    "declarativeNetRequest",
+    "privacy"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["lib/timezone.js", "content-inject.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "lib/timezone.js",
+        "content-inject.js"
+      ],
       "world": "MAIN",
       "run_at": "document_start",
       "all_frames": true,
       "match_origin_as_fallback": true
     },
     {
-      "matches": ["<all_urls>"],
-      "js": ["content-bridge.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content-bridge.js"
+      ],
       "world": "ISOLATED",
       "run_at": "document_start",
       "all_frames": true,
@@ -26,10 +44,18 @@
     }
   ],
   "action": {
-    "default_title": "GeoMirror",
+    "default_title": "notme",
     "default_popup": "popup.html",
-    "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
-  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "homepage_url": "https://github.com/deafenken/notme"
 }

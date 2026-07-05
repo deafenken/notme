@@ -7,6 +7,7 @@ const path = require('path');
 const TZ = require(path.join(__dirname, '..', 'lib', 'timezone.js'));
 const Locale = require(path.join(__dirname, '..', 'lib', 'locale.js'));
 const IPLoc = require(path.join(__dirname, '..', 'lib', 'providers.js'));
+const TZData = require(path.join(__dirname, '..', 'lib', 'tzdata.js'));
 
 let passed = 0;
 
@@ -111,6 +112,25 @@ test('locale inference uses timezone tie-breakers', () => {
   eq(Locale.localeFor('CA', 'America/Montreal').language, 'fr-CA');
   eq(Locale.localeFor('CA', 'America/Toronto').language, 'en-CA');
   eq(Locale.localeFor('BE', 'Europe/Brussels').languages, ['nl-BE', 'nl', 'fr-BE', 'fr', 'en']);
+});
+
+test('manual timezone fallback: profiles derive country, coords, and a locale', () => {
+  const jp = TZData.profileForTz('Asia/Tokyo');
+  eq([jp.cc, typeof jp.lat, typeof jp.lon], ['JP', 'number', 'number']);
+  eq(Locale.localeFor(jp.cc, 'Asia/Tokyo').language, 'ja-JP');
+  eq(Locale.localeFor(TZData.profileForTz('America/Los_Angeles').cc, 'America/Los_Angeles').language, 'en-US');
+  eq(TZ.tzOffsetMinutes('Asia/Tokyo', new Date('2026-06-15T00:00:00Z')), -540);
+  // every dropdown entry has a valid profile with a real IANA offset
+  for (const tz of TZData.TZ_ORDER) {
+    const p = TZData.profileForTz(tz);
+    assert(p.cc && p.lat != null && p.label, 'incomplete profile for ' + tz);
+    assert(TZ.tzOffsetMinutes(tz, new Date('2026-06-15T00:00:00Z')) !== null, 'bad tz ' + tz);
+  }
+  // unknown timezone still round-trips (tz kept, no coords)
+  const u = TZData.profileForTz('Pacific/Chatham');
+  eq([u.tz, u.lat, u.cc], ['Pacific/Chatham', null, null]);
+  // China zones are intentionally excluded from the picker
+  assert(!TZData.TZ_ORDER.includes('Asia/Shanghai'), 'China zones must not be offered');
 });
 
 test('locale inference falls back to neutral English', () => {

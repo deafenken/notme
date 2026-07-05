@@ -30,15 +30,17 @@ GeoMirror detects your visible **exit IP**, derives a plausible browser profile 
 
 | Surface | What GeoMirror changes |
 | --- | --- |
-| HTML5 geolocation | Spoofs `navigator.geolocation` to a residential-looking coordinate near the exit IP. |
-| Geolocation permission | Reports geolocation permission as `granted` to avoid permission-state mismatch. |
-| Timezone offset | Spoofs `Date.prototype.getTimezoneOffset()` with DST-aware IANA timezone logic. |
-| Intl timezone | Spoofs default `Intl.DateTimeFormat` timezone and `resolvedOptions().timeZone`. |
+| HTML5 geolocation | Spoofs `navigator.geolocation` to a residential-looking coordinate near the exit IP, and returns a genuine `GeolocationPosition`. |
+| Geolocation permission | Reports geolocation permission as `granted` via a real `PermissionStatus`, to avoid permission-state mismatch. |
+| **Whole `Date` local-time surface** | DST-aware IANA logic drives `getTimezoneOffset()` **and** every local getter (`getHours`/`getDate`/`getDay`/`getMonth`/`getFullYear`/…), the local setters, `toString`/`toDateString`/`toTimeString`, `toLocaleString`/`toLocaleDateString`/`toLocaleTimeString`, the numeric multi-arg constructor, offset-less `Date.parse`, and `Date()` called as a function — so no `Date` method contradicts the spoofed offset. |
+| Intl timezone | Spoofs default `Intl.DateTimeFormat` timezone and `resolvedOptions().timeZone` (even when a locale is passed). |
 | Browser language | Spoofs `navigator.language` and `navigator.languages`. |
-| Intl locale | Spoofs default locale for `Intl.DateTimeFormat`, `Intl.NumberFormat`, and `Intl.Collator`. |
-| Request language | Sets outgoing `Accept-Language` via Chrome `declarativeNetRequest`. |
+| Intl locale | Spoofs the default locale for `DateTimeFormat`, `NumberFormat`, `Collator`, `RelativeTimeFormat`, `PluralRules`, `ListFormat`, `DisplayNames`, `Segmenter`, `DurationFormat`, plus `Number`/`Array`/`BigInt.prototype.toLocaleString`. |
+| Request language | Sets the outgoing `Accept-Language` header on **all** request types via Chrome `declarativeNetRequest`. |
+| WebRTC IP leak | Optionally forces WebRTC through the proxy (`chrome.privacy` → `disable_non_proxied_udp`) so ICE candidates can't reveal the real, proxy-bypassing IP. |
+| Anti-detection | Spoofed functions report native to both `fn.toString()` and the intrinsic `Function.prototype.toString.call(fn)`; the override payload is not left in the DOM. |
 
-The goal is simple: if your IP looks like Tokyo, the browser should not still look like Shanghai, Los Angeles, or Berlin.
+The goal is simple: if your IP looks like Tokyo, the browser should not still look like Shanghai, Los Angeles, or Berlin — and no single `Date` or `Intl` call should quietly give it away.
 
 ## Privacy model
 
@@ -91,12 +93,12 @@ Technical sequence:
 3. `lib/geo.js` chooses a nearby residential-looking coordinate using OpenStreetMap / Overpass.
 4. `lib/locale.js` infers a plausible locale bundle from country code + timezone.
 5. `background.js` stores the override locally and installs a dynamic `Accept-Language` header rule.
-6. `content-bridge.js` runs in Chrome’s isolated extension world, reads local storage, and publishes the payload into a DOM attribute.
+6. `content-bridge.js` runs in Chrome’s isolated extension world, reads local storage, and posts the payload to the MAIN world via `window.postMessage`.
 7. `content-inject.js` runs in the page’s MAIN world at `document_start` and patches the browser APIs before page scripts run.
 
 ## Install
 
-### Option A — load unpacked
+### Option A — load unpacked (Chrome / Brave / any Chromium)
 
 1. Download or clone this repository.
 2. Open `chrome://extensions`.
@@ -105,9 +107,22 @@ Technical sequence:
 5. Select the `geomirror` folder.
 6. Pin GeoMirror and click **Refresh** in the popup.
 
-### Option B — Chrome Web Store
+### Option B — load unpacked (Microsoft Edge)
 
-A store listing is planned. Until then, use the unpacked extension.
+GeoMirror is a standard Chromium MV3 extension, so Edge loads it the same way:
+
+1. Download or clone this repository.
+2. Open `edge://extensions` (type it into the address bar).
+3. Toggle **Developer mode** on (bottom-left).
+4. Click **Load unpacked**.
+5. Select the `geomirror` folder (the one containing `manifest.json`).
+6. Pin GeoMirror from the puzzle-piece menu, open it, and click **Refresh**.
+
+Edge honors the same `chrome.*` APIs GeoMirror uses (`declarativeNetRequest`, `alarms`, `privacy`), so all features work unchanged. If the popup shows an error, click **Refresh** once your proxy/VPN is connected.
+
+### Option C — Chrome Web Store / Edge Add-ons
+
+Store listings are planned. Until then, use the unpacked extension.
 
 ## Verify it works
 
@@ -132,8 +147,9 @@ Useful public checks:
 ## Settings
 
 - **Location spoof** — enable/disable geolocation override.
-- **Timezone spoof** — enable/disable `Date` and `Intl.DateTimeFormat` timezone override.
+- **Timezone spoof** — enable/disable the `Date` and `Intl` timezone override.
 - **Language spoof** — enable/disable `navigator.language(s)`, Intl locale, and `Accept-Language` header override.
+- **Block WebRTC IP leak** — force WebRTC through the proxy so ICE candidates can't expose the real IP. Default on. Turn it off if you use WebRTC calls (e.g. video chat) over a proxy that has no UDP relay — with it on, such calls may fail to connect rather than leak.
 - **Reported accuracy (m)** — reported GPS accuracy, default 30 m.
 - **Auto-refresh interval (minutes)** — how often GeoMirror re-detects the exit IP.
 - **ipinfo.io token (optional)** — improves fallback reliability if you have a token.
@@ -145,8 +161,9 @@ Useful public checks:
 | `storage` | Save settings and computed overrides locally. |
 | `alarms` | Schedule periodic exit-IP refresh. |
 | `declarativeNetRequest` | Set the outgoing `Accept-Language` header without reading page traffic. |
+| `privacy` | Set the WebRTC IP-handling policy so WebRTC can't leak the real IP. Optional — controlled by the "Block WebRTC IP leak" toggle. |
 | `<all_urls>` content script | Patch browser APIs on normal web pages before page scripts run. |
-| `host_permissions` | Call the explicitly listed IP/geolocation/Overpass/reverse-geocode providers. |
+| `host_permissions: <all_urls>` | Required for two reasons: `declarativeNetRequest` `modifyHeaders` only applies to sites the extension has host access to (without it the `Accept-Language` rule is silently skipped on the sites you actually visit), and the IP/geolocation/Overpass/reverse-geocode providers must be reachable. |
 
 ## If you do not want to install this extension
 
@@ -177,13 +194,25 @@ Requirements:
 11. Document the privacy model clearly: no telemetry, no page-content reading, local storage only, and explicit provider requests only for exit-IP/location matching.
 ```
 
-## Limitations
+## What v1.2 fixed
 
-- GeoMirror improves consistency. It is not a complete anti-fingerprinting system.
-- IP geolocation is approximate.
-- Locale inference is heuristic because IP providers do not know the real user language.
-- Chrome extensions cannot inject into `chrome://`, the Chrome Web Store, or other privileged pages.
-- Some platforms may use additional risk signals outside browser JavaScript and headers.
+These were real gaps in earlier versions and are now closed:
+
+- **`Date` self-contradiction.** Previously only `getTimezoneOffset()` and `Intl.DateTimeFormat` were spoofed, so `new Date().getHours()`, `.toString()` (`… GMT+0800 (China Standard Time)`), `.toLocaleString()`, `Number.prototype.toLocaleString`, and most of the `Intl.*` family still leaked the host machine's timezone/locale — a one-line cross-check unmasked the spoof. The whole `Date` local-time surface and every locale-aware `Intl` constructor are now virtualized in the exit-IP zone.
+- **`Accept-Language` was silently not applied.** `declarativeNetRequest` `modifyHeaders` needs host access to the visited site; the old manifest only listed the IP-API domains, so the header rule was skipped on real sites. `host_permissions` is now `<all_urls>`, and the rule covers **all** resource types (previously only main-frame/sub-frame/XHR — images, fonts, scripts, and beacons leaked the real language).
+- **`Intl.DateTimeFormat` dropped the timezone** in the no-locale path (a positional-argument bug), leaking the host timezone whenever timezone spoofing ran with language spoofing off. Fixed.
+- **WebRTC could leak the real IP** around the proxy. Now optionally forced through the proxy.
+- **Spoof detection.** `Function.prototype.toString.call(fn)` used to return the wrapper source; the override payload sat readable in `<html data-geomirror>`; `permissions.query` returned a plain object. All fixed.
+- **Opaque-origin frames.** `about:blank` / `srcdoc` / `data:` / `blob:` child frames are now patched (`match_origin_as_fallback`).
+
+## Remaining limitations (honest list)
+
+- GeoMirror improves consistency of location/timezone/locale signals. It is **not** a complete anti-fingerprinting system (it does not touch canvas, WebGL, fonts, audio, screen, or User-Agent — deliberately, since spoofing those inconsistently is often *more* detectable).
+- IP geolocation is approximate; the residential coordinate is a plausible nearby point, not your real address.
+- Locale inference is heuristic — IP providers do not know your real language, so it is derived from country code + timezone.
+- **Web Workers, Service Workers, and Worklets keep the real timezone/locale.** A content script cannot patch worker global scopes, and rewriting worker source would break cross-origin and relative-import workers. Code that reads `Date`/`Intl` **inside** a worker can still see the host zone. This is a hard platform limit for extensions.
+- Browser extensions cannot inject into `chrome://` / `edge://`, the extension stores, or other privileged pages.
+- Some platforms use additional risk signals outside browser JavaScript and headers (TLS/HTTP fingerprints, account history, behavioral signals) that no browser extension can change.
 
 ## Development
 

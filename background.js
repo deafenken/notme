@@ -19,10 +19,19 @@ const DEFAULT_SETTINGS = {
   ipToken: '',            // optional ipinfo.io token for better fallback
   tzEnabled: true,        // spoof Date/Intl timezone to match exit IP
   langEnabled: true,      // spoof navigator.language / Intl locale + Accept-Language header
+  webrtcProtect: true,    // force WebRTC through the proxy so it can't leak the real IP
 };
 
 const ALARM = 'refresh';
 const AL_RULE_ID = 9001; // dynamic declarativeNetRequest rule id for Accept-Language
+
+// Apply the Accept-Language override to every request type. Omitting resource
+// types (or listing only a subset) leaves images/scripts/fonts/beacons sending
+// the real host Accept-Language, which contradicts the spoofed navigator.language.
+const AL_RESOURCE_TYPES = [
+  'main_frame', 'sub_frame', 'stylesheet', 'script', 'image', 'font',
+  'object', 'xmlhttprequest', 'ping', 'csp_report', 'media', 'other',
+];
 
 async function getSettings() {
   const { settings } = await chrome.storage.local.get('settings');
@@ -47,7 +56,7 @@ async function syncHeaderRule(settings, override) {
     await chrome.declarativeNetRequest.updateDynamicRules({
       removeRuleIds: [AL_RULE_ID],
     });
-    if (!(settings && settings.enabled && settings.langEnabled)) return;
+    if (!(settings && settings.langEnabled)) return;
     let al = override && override.acceptLanguage;
     if (!al) return; // nothing to enforce yet
     await chrome.declarativeNetRequest.updateDynamicRules({
@@ -62,11 +71,31 @@ async function syncHeaderRule(settings, override) {
         },
         condition: {
           urlFilter: '*',
-          resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest'],
+          resourceTypes: AL_RESOURCE_TYPES,
         },
       }],
     });
   } catch (_) { /* DNR may be unavailable on some builds; fail soft */ }
+}
+
+/**
+ * Force WebRTC through the proxy so ICE candidates can't leak the machine's real
+ * (proxy-bypassing) public/LAN IP — which would geolocate to the host city and
+ * blow the whole "match the exit IP" premise. Extension-controlled privacy
+ * settings auto-revert when GeoMirror is disabled or removed. Fails soft where
+ * the privacy API is unavailable.
+ */
+async function syncWebRTC(settings) {
+  try {
+    if (!(chrome.privacy && chrome.privacy.network && chrome.privacy.network.webRTCIPHandlingPolicy)) return;
+    const on = !!(settings && settings.webrtcProtect);
+    if (on) {
+      await chrome.privacy.network.webRTCIPHandlingPolicy.set({ value: 'disable_non_proxied_udp' });
+    } else {
+      // Relinquish control rather than pinning 'default' under this extension.
+      await chrome.privacy.network.webRTCIPHandlingPolicy.clear({});
+    }
+  } catch (_) { /* privacy API may be restricted; fail soft */ }
 }
 
 async function refresh() {
@@ -113,6 +142,7 @@ async function refresh() {
     };
     await chrome.storage.local.set({ override, state });
     await syncHeaderRule(s, override);
+    await syncWebRTC(s);
   } catch (e) {
     await patchState({
       status: 'error',
@@ -132,15 +162,18 @@ chrome.runtime.onInstalled.addListener(async () => {
   const { settings } = await chrome.storage.local.get('settings');
   if (!settings) await chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
   await ensureAlarm();
+  await syncWebRTC(await getSettings());
   await refresh();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await ensureAlarm();
   const { state, override, settings } = await chrome.storage.local.get(['state', 'override', 'settings']);
-  // Re-assert the header rule on startup (dynamic rules don't persist a value
-  // we control across browser restarts in all cases).
-  await syncHeaderRule({ ...DEFAULT_SETTINGS, ...(settings || {}) }, override);
+  // Re-assert the header rule + WebRTC policy on startup (extension-controlled
+  // settings and dynamic rules aren't guaranteed to persist across restarts).
+  const merged = { ...DEFAULT_SETTINGS, ...(settings || {}) };
+  await syncHeaderRule(merged, override);
+  await syncWebRTC(merged);
   const s = await getSettings();
   const age = state && state.lastUpdated ? Date.now() - state.lastUpdated : Infinity;
   if (!state || age > s.refreshMinutes * 60000) await refresh();
@@ -164,8 +197,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         override.langEnabled = next.langEnabled;
         await chrome.storage.local.set({ override });
       }
-      // Toggling language spoofing changes whether the header rule is active.
+      // Toggling language spoofing changes whether the header rule is active;
+      // toggling location/WebRTC protection changes the WebRTC policy.
       await syncHeaderRule(next, override);
+      await syncWebRTC(next);
       if (msg.patch && 'refreshMinutes' in msg.patch) await ensureAlarm();
     }
     // Return a fresh snapshot for any message (covers GET_STATE too).

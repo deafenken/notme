@@ -54,6 +54,7 @@ function render({ state, override, settings }) {
   $('enabled').checked = settings ? settings.enabled !== false : true;
   $('tzEnabled').checked = settings ? settings.tzEnabled !== false : true;
   $('langEnabled').checked = settings ? settings.langEnabled !== false : true;
+  $('webrtcProtect').checked = settings ? settings.webrtcProtect !== false : true;
   if (settings) {
     $('accuracyM').value = settings.accuracyM;
     $('refreshMinutes').value = settings.refreshMinutes;
@@ -82,6 +83,7 @@ function bind(id, key, map) {
 bind('enabled', 'enabled');
 bind('tzEnabled', 'tzEnabled');
 bind('langEnabled', 'langEnabled');
+bind('webrtcProtect', 'webrtcProtect');
 bind('accuracyM', 'accuracyM', (v) => Math.max(5, Math.min(500, +v || 30)));
 bind('refreshMinutes', 'refreshMinutes', (v) => Math.max(30, Math.min(10080, +v || 360)));
 bind('ipToken', 'ipToken', (v) => (v || '').trim());

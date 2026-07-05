@@ -1,27 +1,28 @@
 /* GeoMirror — isolated-world bridge.
  *
  * Runs in the isolated world (has chrome.* access) at document_start. It reads
- * the chosen override from storage and publishes it onto <html data-geomirror>,
- * where the MAIN-world injector can read it. MAIN-world scripts cannot access
- * chrome.storage, so this bridge is the only way to pass the coordinate across.
+ * the chosen override from storage and hands it to the MAIN-world injector.
+ * MAIN-world scripts cannot access chrome.storage, so this bridge is the only
+ * way to pass the payload across.
  *
- * It now also publishes timezone + locale fields so the injector can spoof the
- * Date timezone offset and navigator.language / Intl locale, not just coords.
+ * The handoff uses window.postMessage — structured clone reliably crosses the
+ * isolated↔MAIN world boundary (a CustomEvent's `detail` does NOT), and it
+ * leaves no page-observable mutation on the document. A request/response
+ * handshake makes delivery robust regardless of which world's script runs
+ * first: the injector asks ('req') and the bridge also publishes proactively.
  *
  * It re-publishes on storage changes, so open pages pick up refreshes and
  * enable/disable toggles live.
  */
 (function () {
-  const root = document.documentElement;
-  if (!root) return;
+  const MARK = '__geomirror__';
 
   function publish() {
     chrome.storage.local.get(['override', 'settings'], (data) => {
       const s = data.settings || {};
       const o = data.override;
-      const enabled = s.enabled !== false;
       const payload = {
-        enabled,
+        enabled: s.enabled !== false,
         lat: o ? o.lat : null,
         lon: o ? o.lon : null,
         acc: o ? o.acc : (s.accuracyM || 30),
@@ -32,10 +33,13 @@
         locale: o ? o.locale : null,
         languages: o ? o.languages : null,
       };
-      root.setAttribute('data-geomirror', JSON.stringify(payload));
+      try { window.postMessage({ [MARK]: 'data', payload }, '*'); } catch (_) {}
     });
   }
 
+  window.addEventListener('message', (e) => {
+    if (e.data && e.data[MARK] === 'req') publish();
+  });
   publish();
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && (changes.override || changes.settings)) publish();

@@ -39,6 +39,64 @@ test('timezone helper returns null for invalid IANA timezone', () => {
   eq(TZ.tzOffsetMinutes('Not/A_Zone', new Date('2026-06-15T12:00:00Z')), null);
 });
 
+test('wallClock returns the target zone wall-clock components (DST + weekday)', () => {
+  // 2026-06-15 03:00 UTC -> Tokyo (UTC+9) 12:00, and 2026-06-15 is a Monday.
+  eq(TZ.wallClock('Asia/Tokyo', new Date('2026-06-15T03:00:00Z')), {
+    year: 2026, month: 5, day: 15, hour: 12, minute: 0, second: 0, ms: 0, weekday: 1,
+  });
+  // 2026-01-15 00:00 UTC -> LA (PST, UTC-8) 2026-01-14 16:00, a Wednesday.
+  eq(TZ.wallClock('America/Los_Angeles', new Date('2026-01-15T00:00:00Z')), {
+    year: 2026, month: 0, day: 14, hour: 16, minute: 0, second: 0, ms: 0, weekday: 3,
+  });
+  // Half-hour zone keeps the :30 and preserves milliseconds.
+  const k = TZ.wallClock('Asia/Kolkata', new Date('2026-06-15T06:15:00.123Z'));
+  eq([k.hour, k.minute, k.ms], [11, 45, 123]);
+});
+
+test('localWallToEpoch round-trips through wallClock across zones and DST', () => {
+  const cases = [
+    ['Asia/Tokyo', 2026, 5, 15, 12, 30, 45, 0],
+    ['America/Los_Angeles', 2026, 6, 4, 23, 59, 0, 0],   // PDT
+    ['America/Los_Angeles', 2026, 0, 4, 8, 15, 0, 0],    // PST
+    ['Asia/Kolkata', 2026, 2, 1, 5, 30, 0, 0],
+    ['Europe/London', 2026, 11, 25, 0, 0, 0, 0],
+  ];
+  for (const [tz, y, mo, d, h, mi, s, ms] of cases) {
+    const epoch = TZ.localWallToEpoch(tz, y, mo, d, h, mi, s, ms);
+    const w = TZ.wallClock(tz, new Date(epoch));
+    eq([w.year, w.month, w.day, w.hour, w.minute, w.second, w.ms],
+       [y, mo, d, h, mi, s, ms]);
+  }
+});
+
+test('localWallToEpoch resolves DST transition-day wall times like a local browser', () => {
+  // America/New_York spring-forward: 2026-03-08 02:00 EST -> 03:00 EDT.
+  // The nonexistent 02:30 shifts forward to 03:30 EDT = 07:30 UTC.
+  eq(TZ.localWallToEpoch('America/New_York', 2026, 2, 8, 2, 30, 0, 0),
+     Date.parse('2026-03-08T07:30:00Z'));
+  // Fall-back: 2026-11-01 02:00 EDT -> 01:00 EST. Ambiguous 01:30 takes the
+  // earlier (EDT) occurrence = 05:30 UTC.
+  eq(TZ.localWallToEpoch('America/New_York', 2026, 10, 1, 1, 30, 0, 0),
+     Date.parse('2026-11-01T05:30:00Z'));
+  // A plain, non-transition day is unaffected.
+  eq(TZ.localWallToEpoch('America/New_York', 2026, 5, 1, 12, 0, 0, 0),
+     Date.parse('2026-06-01T16:00:00Z')); // noon EDT = 16:00 UTC
+});
+
+test('formatGMT matches the native GMT offset suffix', () => {
+  eq(TZ.formatGMT(-540), 'GMT+0900'); // UTC+9
+  eq(TZ.formatGMT(420), 'GMT-0700');  // UTC-7
+  eq(TZ.formatGMT(480), 'GMT-0800');  // UTC-8
+  eq(TZ.formatGMT(0), 'GMT+0000');
+  eq(TZ.formatGMT(-330), 'GMT+0530'); // UTC+5:30
+});
+
+test('nativeDateStrings reproduces the native toString layout in the spoofed zone', () => {
+  const s = TZ.nativeDateStrings('Asia/Tokyo', new Date('2026-06-15T03:00:00Z'));
+  eq(s.date, 'Mon Jun 15 2026');
+  eq(s.time, '12:00:00 GMT+0900 (Japan Standard Time)');
+});
+
 test('locale inference handles country defaults', () => {
   eq(Locale.localeFor('JP', 'Asia/Tokyo'), {
     language: 'ja-JP',
@@ -117,6 +175,29 @@ test('manifest includes timezone helper before MAIN-world injector', () => {
   assert(mainScript, 'MAIN world content script is missing');
   eq(mainScript.js, ['lib/timezone.js', 'content-inject.js']);
   assert(manifest.permissions.includes('declarativeNetRequest'), 'DNR permission is required for Accept-Language');
+});
+
+test('manifest grants the host access DNR needs + covers about:blank/srcdoc frames', () => {
+  const manifest = require(path.join(__dirname, '..', 'manifest.json'));
+  // DNR modifyHeaders needs host access for the visited site, not just the API domains.
+  assert(manifest.host_permissions.includes('<all_urls>'),
+    'host_permissions must cover visited sites so the Accept-Language rule applies');
+  // WebRTC IP-leak protection needs the privacy API.
+  assert(manifest.permissions.includes('privacy'), 'privacy permission is required for WebRTC protection');
+  // Both content scripts must reach about:blank / srcdoc / data: / blob: child frames.
+  for (const cs of manifest.content_scripts) {
+    assert(cs.match_origin_as_fallback === true,
+      'content scripts must set match_origin_as_fallback to patch opaque-origin frames');
+  }
+});
+
+test('background applies Accept-Language to all resource types and blocks WebRTC leaks', () => {
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
+  for (const t of ['script', 'image', 'font', 'media', 'ping', 'stylesheet', 'object']) {
+    assert(src.includes(`'${t}'`), `Accept-Language rule must cover the ${t} resource type`);
+  }
+  assert(src.includes('disable_non_proxied_udp'), 'WebRTC policy must force non-proxied UDP off');
+  assert(/webrtcProtect:\s*true/.test(src), 'webrtcProtect should default on');
 });
 
 if (process.exitCode) {

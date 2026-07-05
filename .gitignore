@@ -1,5 +1,8 @@
 # macOS
 .DS_Store
+._*
+.AppleDouble
+.LSOverride
 
 # Node / tooling
 node_modules/

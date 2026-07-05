@@ -6,14 +6,22 @@ GeoMirror aligns the browser-visible profile with the current proxy/VPN exit IP.
 
 The extension currently spoofs:
 
-- HTML5 geolocation (`navigator.geolocation`)
-- geolocation permission query result
-- JavaScript timezone offset (`Date.prototype.getTimezoneOffset`)
-- default `Intl.DateTimeFormat` timezone
-- `navigator.language`
-- `navigator.languages`
-- default `Intl.NumberFormat`, `Intl.Collator`, and `Intl.DateTimeFormat` locale
-- outgoing `Accept-Language` header via Chrome `declarativeNetRequest`
+- HTML5 geolocation (`navigator.geolocation`), returning a real `GeolocationPosition`
+- geolocation permission query result (a real `PermissionStatus` reporting `granted`)
+- the entire `Date` local-time surface in the spoofed IANA zone:
+  - `getTimezoneOffset`
+  - local getters: `getFullYear`/`getMonth`/`getDate`/`getDay`/`getHours`/`getMinutes`/`getSeconds`/`getMilliseconds`/`getYear`
+  - local setters: `setFullYear`/`setMonth`/`setDate`/`setHours`/`setMinutes`/`setSeconds`/`setMilliseconds`/`setYear`
+  - `toString`/`toDateString`/`toTimeString`
+  - `toLocaleString`/`toLocaleDateString`/`toLocaleTimeString`
+  - the numeric multi-arg constructor, offset-less `Date.parse` / `new Date(string)`, and `Date()` called as a function
+- default `Intl.DateTimeFormat` timezone (injected even when a locale is supplied)
+- `navigator.language` and `navigator.languages`
+- default locale for `Intl.DateTimeFormat`, `NumberFormat`, `Collator`, `RelativeTimeFormat`, `PluralRules`, `ListFormat`, `DisplayNames`, `Segmenter`, `DurationFormat`
+- `Number`/`Array`/`BigInt.prototype.toLocaleString`
+- outgoing `Accept-Language` header on all resource types via Chrome `declarativeNetRequest`
+- WebRTC IP-handling policy (optional, via `chrome.privacy`) so ICE candidates can't bypass the proxy
+- `Function.prototype.toString` (so spoofed functions read as native)
 
 ## Runtime flow
 
@@ -22,7 +30,7 @@ The extension currently spoofs:
 3. `lib/geo.js` chooses a nearby residential-looking coordinate using Overpass/OpenStreetMap, with fallback logic when Overpass is unavailable.
 4. `lib/locale.js` infers a plausible locale bundle from country code and timezone.
 5. `background.js` stores the computed override and status in `chrome.storage.local`.
-6. `content-bridge.js` runs in the isolated extension world, reads storage, and publishes the payload to `<html data-geomirror="...">`.
+6. `content-bridge.js` runs in the isolated extension world, reads storage, and posts the payload to the MAIN world via `window.postMessage` (with a request/response handshake so delivery is robust regardless of script order).
 7. `content-inject.js` runs in the page MAIN world at `document_start`, reads that payload, and patches browser APIs before normal page scripts run.
 8. `background.js` installs a dynamic DNR rule to set the outgoing `Accept-Language` request header when language spoofing is enabled.
 
@@ -32,8 +40,10 @@ Chrome extension isolated-world scripts can access `chrome.storage`, but page sc
 
 The bridge solves this split:
 
-- `content-bridge.js`: isolated world, has `chrome.storage`, writes JSON into a DOM attribute.
-- `content-inject.js`: MAIN world, reads that DOM attribute, patches page-visible APIs.
+- `content-bridge.js`: isolated world, has `chrome.storage`, posts JSON to the MAIN world via `window.postMessage`.
+- `content-inject.js`: MAIN world, receives that message, patches page-visible APIs.
+
+`window.postMessage` is used rather than a shared DOM attribute or a `CustomEvent`: an attribute is observable by a generic `MutationObserver`, and a `CustomEvent`'s `detail` does not cross the isolated→MAIN world boundary in Chromium (it arrives as `null`). `postMessage` structured-clones the payload reliably across worlds and leaves no DOM mutation.
 
 ## Timezone implementation
 
@@ -55,13 +65,32 @@ IP providers generally do not return a real user language. `lib/locale.js` uses 
 
 The resulting bundle is used for both JS-visible locale values and the HTTP `Accept-Language` header.
 
+## Date virtualization
+
+The wrappers share one source of truth in `lib/timezone.js`:
+
+- `tzOffsetMinutes(tz, date)` — DST-aware `getTimezoneOffset` value.
+- `wallClock(tz, date)` — the target-zone wall-clock components (shift the UTC instant by the offset, read UTC fields).
+- `localWallToEpoch(tz, y, mo, …)` — the inverse, used by setters, the numeric constructor, and offset-less parsing, with a single DST re-check.
+- `nativeDateStrings(tz, date)` / `tzName` / `formatGMT` — reproduce the native `toString` layout, including the localized zone long name.
+
+Each Date wrapper is installed once and consults the live override state on every call, so toggling a switch in the popup takes effect without reloading the page and wrappers never stack. When a toggle is off (or override data hasn't arrived) every wrapper delegates to the captured native method.
+
+## WebRTC
+
+When "Block WebRTC IP leak" is on, the service worker sets
+`chrome.privacy.network.webRTCIPHandlingPolicy` to `disable_non_proxied_udp`.
+This forces WebRTC to use the proxy path; if the proxy has no UDP relay, WebRTC
+media fails to connect rather than leaking the real IP. Extension-controlled
+privacy settings revert automatically when GeoMirror is disabled or removed.
+
 ## Limitations
 
-- This is browser-surface alignment, not a full anti-fingerprinting system.
-- Locale inference is heuristic.
-- Provider timezone quality depends on the IP geolocation provider.
-- Some pages can use high-entropy fingerprinting surfaces not covered here.
-- Extensions cannot modify every possible low-level browser/network signal.
+- This is browser-surface alignment, not a full anti-fingerprinting system (canvas/WebGL/fonts/audio/UA are intentionally untouched).
+- Locale inference is heuristic; provider timezone quality depends on the IP geolocation provider.
+- **Worker scopes are not covered.** Content scripts run in the page's main world, not inside Web/Shared/Service Workers or Worklets. `Date`/`Intl` read inside a worker still reflect the host zone. Rewriting worker source to inject patches would break cross-origin and relative-import/module workers, so it is deliberately not attempted.
+- Extensions cannot inject into `chrome://` / `edge://`, the extension stores, or other privileged pages.
+- Some platforms use high-entropy or non-browser signals (TLS/HTTP fingerprints, account history) that an extension cannot modify.
 
 ## Testing
 

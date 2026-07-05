@@ -1,20 +1,11 @@
 {
   "manifest_version": 3,
   "name": "GeoMirror",
-  "version": "1.1.0",
-  "description": "Mirror your visible IP into the browser: spoof geolocation, timezone and language so geolocation, Date timezone offset, navigator.language and the Accept-Language header all match your exit IP.",
-  "minimum_chrome_version": "111",
-  "permissions": ["storage", "alarms", "declarativeNetRequest"],
-  "host_permissions": [
-    "https://reallyfreegeoip.org/*",
-    "https://ipwho.is/*",
-    "https://ipapi.co/*",
-    "https://ipinfo.io/*",
-    "https://overpass-api.de/*",
-    "https://overpass.kumi.systems/*",
-    "https://maps.mail.ru/osm/tools/overpass/*",
-    "https://api.bigdatacloud.net/*"
-  ],
+  "version": "1.2.0",
+  "description": "Mirror your visible IP into the browser: spoof geolocation, timezone and language so geolocation, the whole Date/Intl surface, navigator.language and the Accept-Language header all match your exit IP.",
+  "minimum_chrome_version": "119",
+  "permissions": ["storage", "alarms", "declarativeNetRequest", "privacy"],
+  "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
@@ -22,14 +13,16 @@
       "js": ["lib/timezone.js", "content-inject.js"],
       "world": "MAIN",
       "run_at": "document_start",
-      "all_frames": true
+      "all_frames": true,
+      "match_origin_as_fallback": true
     },
     {
       "matches": ["<all_urls>"],
       "js": ["content-bridge.js"],
       "world": "ISOLATED",
       "run_at": "document_start",
-      "all_frames": true
+      "all_frames": true,
+      "match_origin_as_fallback": true
     }
   ],
   "action": {

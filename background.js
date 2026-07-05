@@ -20,6 +20,10 @@ const DEFAULT_SETTINGS = {
   tzEnabled: true,        // spoof Date/Intl timezone to match exit IP
   langEnabled: true,      // spoof navigator.language / Intl locale + Accept-Language header
   webrtcProtect: true,    // force WebRTC through the proxy so it can't leak the real IP
+  fontEnabled: true,      // hide OS/region-revealing CJK fonts from width probing
+  workerEnabled: false,   // (experimental) spoof inside Web Workers — off by default:
+                          // rewriting a worker through a blob can break WASM/bundled
+                          // workers that rely on self.location. Opt in if you need it.
 };
 
 const ALARM = 'refresh';

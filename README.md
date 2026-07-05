@@ -38,6 +38,8 @@ GeoMirror detects your visible **exit IP**, derives a plausible browser profile 
 | Intl locale | Spoofs the default locale for `DateTimeFormat`, `NumberFormat`, `Collator`, `RelativeTimeFormat`, `PluralRules`, `ListFormat`, `DisplayNames`, `Segmenter`, `DurationFormat`, plus `Number`/`Array`/`BigInt.prototype.toLocaleString`. |
 | Request language | Sets the outgoing `Accept-Language` header on **all** request types via Chrome `declarativeNetRequest`. |
 | WebRTC IP leak | Optionally forces WebRTC through the proxy (`chrome.privacy` → `disable_non_proxied_udp`) so ICE candidates can't reveal the real, proxy-bypassing IP. |
+| Web Workers | Optionally (experimental, off by default) extends timezone + locale spoofing into dedicated Web Workers (where fingerprinters read the real timezone to bypass main-thread spoofing). |
+| CJK fonts | Optionally hides OS/region-revealing Chinese fonts (Microsoft YaHei, PingFang, SimSun, …, Simplified + Traditional) from canvas `measureText` and DOM width probes. |
 | Anti-detection | Spoofed functions report native to both `fn.toString()` and the intrinsic `Function.prototype.toString.call(fn)`; the override payload is not left in the DOM. |
 
 The goal is simple: if your IP looks like Tokyo, the browser should not still look like Shanghai, Los Angeles, or Berlin — and no single `Date` or `Intl` call should quietly give it away.
@@ -150,6 +152,8 @@ Useful public checks:
 - **Timezone spoof** — enable/disable the `Date` and `Intl` timezone override.
 - **Language spoof** — enable/disable `navigator.language(s)`, Intl locale, and `Accept-Language` header override.
 - **Block WebRTC IP leak** — force WebRTC through the proxy so ICE candidates can't expose the real IP. Default on. Turn it off if you use WebRTC calls (e.g. video chat) over a proxy that has no UDP relay — with it on, such calls may fail to connect rather than leak.
+- **Hide CJK fonts** — strip region-revealing Chinese fonts from canvas/DOM width probes so they read as not-installed. Default on.
+- **Spoof in Web Workers** *(experimental)* — extend timezone/locale spoofing into dedicated Web Workers. **Default off**, because it reloads worker code through a blob shim which can break WASM/bundled workers that rely on `self.location`. It probes for CSP `blob:` support and falls back to a native worker when blocked (so it won't silently kill workers), but enable it only if you need worker-level timezone hiding, and turn it off if a site's worker misbehaves.
 - **Reported accuracy (m)** — reported GPS accuracy, default 30 m.
 - **Auto-refresh interval (minutes)** — how often GeoMirror re-detects the exit IP.
 - **ipinfo.io token (optional)** — improves fallback reliability if you have a token.
@@ -207,10 +211,10 @@ These were real gaps in earlier versions and are now closed:
 
 ## Remaining limitations (honest list)
 
-- GeoMirror improves consistency of location/timezone/locale signals. It is **not** a complete anti-fingerprinting system (it does not touch canvas, WebGL, fonts, audio, screen, or User-Agent — deliberately, since spoofing those inconsistently is often *more* detectable).
+- GeoMirror improves consistency of location/timezone/locale signals. It is **not** a complete anti-fingerprinting system: it does not touch canvas *pixel* readback, WebGL, audio, screen, or User-Agent (spoofing those inconsistently is often *more* detectable). Font hiding covers CJK-font *width* probing only.
 - IP geolocation is approximate; the residential coordinate is a plausible nearby point, not your real address.
 - Locale inference is heuristic — IP providers do not know your real language, so it is derived from country code + timezone.
-- **Web Workers, Service Workers, and Worklets keep the real timezone/locale.** A content script cannot patch worker global scopes, and rewriting worker source would break cross-origin and relative-import workers. Code that reads `Date`/`Intl` **inside** a worker can still see the host zone. This is a hard platform limit for extensions.
+- **Worker coverage is partial.** Classic dedicated Web Workers are now spoofed (via the "Spoof in Web Workers" toggle), but **Shared Workers, Service Workers, Worklets, and module workers still read the host timezone/locale** — a content script can't patch those scopes without breaking them.
 - Browser extensions cannot inject into `chrome://` / `edge://`, the extension stores, or other privileged pages.
 - Some platforms use additional risk signals outside browser JavaScript and headers (TLS/HTTP fingerprints, account history, behavioral signals) that no browser extension can change.
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GeoMirror",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Mirror your visible IP into the browser: spoof geolocation, timezone and language so geolocation, the whole Date/Intl surface, navigator.language and the Accept-Language header all match your exit IP.",
   "minimum_chrome_version": "119",
   "permissions": ["storage", "alarms", "declarativeNetRequest", "privacy"],

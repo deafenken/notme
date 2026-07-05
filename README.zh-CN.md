@@ -199,6 +199,8 @@ navigator.geolocation.getCurrentPosition(console.log, console.error)
 - **Timezone spoof**：启用/关闭 `Date` 和 `Intl` 时区伪装。
 - **Language spoof**：启用/关闭 `navigator.language(s)`、Intl locale、`Accept-Language`。
 - **Block WebRTC IP leak**：强制 WebRTC 走代理，让 ICE candidate 无法暴露真实 IP。默认开启。如果你在没有 UDP 中继的代理上使用视频通话等 WebRTC 功能，可关闭它 —— 开启时这类通话可能连不上，但不会泄露真实 IP。
+- **Hide CJK fonts**：把暴露操作系统/地区的中文字体(微软雅黑、苹方、宋体、黑体…简繁都含)从 canvas `measureText` 和 DOM 宽度探测里剥掉，让它们读起来像"未安装"。默认开启。
+- **Spoof in Web Workers（实验性）**：把时区/语言伪装扩展到专用 Web Worker(指纹站常在 worker 里读真实时区来绕过主线程伪装)。**默认关闭** —— 它通过 blob 垫片重新加载 worker 代码,可能破坏依赖 `self.location` 的 WASM/打包 worker。它会探测 CSP 是否允许 `blob:`,被拦时回退到原生 worker(不会静默弄坏 worker),但请仅在你确实需要 worker 级时区隐藏时开启;某站点 worker 出问题就关掉它。
 - **Accuracy (m)**：上报给页面的定位精度，默认 30 米。
 - **Refresh (min)**：重新检测出口 IP 的间隔。
 - **ipinfo.io token（可选）**：有 token 时可提升 fallback 稳定性。
@@ -259,7 +261,8 @@ navigator.geolocation.getCurrentPosition(console.log, console.error)
 - GeoMirror 提升的是位置/时区/语言信号的一致性，**不是**完整反指纹系统（刻意不改 canvas、WebGL、字体、音频、屏幕、User-Agent —— 不一致地伪装这些往往更容易被检测）。
 - IP 地理位置本身是近似值；住宅坐标是附近的合理点，不是你的真实地址。
 - 语言推断是启发式的，因为 IP provider 不知道用户真实语言。
-- **Web Worker、Service Worker、Worklet 仍保留真实时区/语言。** 内容脚本无法 patch worker 全局作用域，而重写 worker 源码会破坏跨域和相对路径/模块 worker，因此刻意不做。在 worker **内部**读取 `Date`/`Intl` 仍会看到本机时区 —— 这是扩展的硬性平台限制。
+- **Worker 覆盖是部分的。** 经典专用 Web Worker 现在会被伪装(通过 "Spoof in Web Workers" 开关),但 **Shared Worker、Service Worker、Worklet 以及模块(module)worker 仍读取本机时区/语言** —— 内容脚本无法在不破坏它们的前提下 patch 这些作用域。
+- **字体隐藏只针对宽度探测。** 覆盖 canvas `measureText` 和 DOM 元素宽度;不改 canvas **像素**读取(`toDataURL`/`getImageData`)指纹,也不覆盖用 CSS 类(而非内联 style)设置字体的探测。
 - 浏览器扩展无法注入 `chrome://` / `edge://`、扩展商店等特权页面。
 - 平台可能使用浏览器 JS 和请求头以外的其他信号（TLS/HTTP 指纹、账号历史、行为信号），这些扩展无法改变。
 

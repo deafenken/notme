@@ -88,6 +88,9 @@
   // ("Location spoof") switch.
   function tzActive() { return !!(cache && cache.tzEnabled && cache.timezone && TZ); }
   function langActive() { return !!(cache && cache.langEnabled && cache.locale); }
+  // Font hiding is IP-independent, so it defaults on before override data arrives.
+  function fontActive() { return !cache || cache.fontEnabled !== false; }
+  function workerActive() { return !!(cache && cache.workerEnabled !== false && (tzActive() || langActive())); }
 
   // ---------------------------------------------------------------------------
   // Native-identity helpers.
@@ -488,12 +491,293 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Font hiding — stop canvas/DOM width probes from detecting the OS/region-
+  // revealing CJK fonts (Microsoft YaHei / PingFang / SimSun / …). A width probe
+  // renders text in "'TestFont', <generic>" and compares against the generic
+  // baseline; if we strip the blacklisted family before measuring, the probe
+  // sees the baseline width and concludes the font is not installed.
+  // ---------------------------------------------------------------------------
+  const FONT_BLACKLIST = [
+    '微软雅黑', 'microsoft yahei', 'msyh', '微软正黑体', '微軟正黑體', 'microsoft jhenghei', 'msjh',
+    '苹方', '蘋方', 'pingfang sc', 'pingfang tc', 'pingfang hk', 'pingfang',
+    '宋体', '宋體', 'simsun', 'nsimsun', 'songti sc', 'songti tc', 'songti', '新宋体', '新宋體',
+    '黑体', '黑體', 'simhei', 'heiti sc', 'heiti tc', 'heiti',
+    '楷体', '楷體', 'kaiti', 'kaiti sc', 'kaiti tc', '标楷体', '標楷體', 'dfkai-sb', 'kaiu',
+    '仿宋', 'fangsong', 'stfangsong', '等线', 'dengxian',
+    '细明体', '細明體', 'mingliu', '新细明体', '新細明體', 'pmingliu',
+    '华文黑体', '华文宋体', '华文楷体', '华文细黑', '华文仿宋', 'stheiti', 'stsong', 'stkaiti', 'stxihei',
+    '思源黑体', '思源宋体', 'source han sans', 'source han serif',
+    'noto sans cjk', 'noto serif cjk', 'noto sans sc', 'noto serif sc', 'noto sans tc', 'noto serif tc',
+    'wenquanyi', '文泉驿', 'hiragino sans gb', '幼圆', 'youyuan',
+  ];
+  function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  const CJK_RE = new RegExp('([\'"]?)(' + FONT_BLACKLIST.map(escRe).join('|') + ')\\1\\s*,?', 'gi');
+  // Returns a font/family string with the blacklisted CJK families removed, or
+  // null when the input contains none (so callers can cheaply skip).
+  function stripCJK(fontStr) {
+    if (!fontStr) return null;
+    const lower = ('' + fontStr).toLowerCase();
+    let hit = false;
+    for (let i = 0; i < FONT_BLACKLIST.length; i++) { if (lower.indexOf(FONT_BLACKLIST[i]) >= 0) { hit = true; break; } }
+    if (!hit) return null;
+    let out = ('' + fontStr).replace(CJK_RE, '').replace(/,\s*,/g, ',').replace(/,\s*$/, '').replace(/^\s*,/, '').replace(/\s+/g, ' ').trim();
+    return out;
+  }
+
+  // Set ctx.font, retrying with an appended generic if a family-less strip result
+  // was rejected (so "72px SimSun" -> "72px" -> "72px sans-serif" still measures
+  // as a fallback instead of silently keeping the CJK font).
+  function trySetCanvasFont(ctx, stripped, saved) {
+    ctx.font = stripped;
+    if (ctx.font !== saved) return true;
+    ctx.font = (stripped + ' sans-serif').trim();
+    return ctx.font !== saved;
+  }
+  const realGBCRforProbe = (typeof Element !== 'undefined') ? Element.prototype.getBoundingClientRect : null;
+  // A font-detection probe renders its sample off-screen; real content the user
+  // sees is on-screen. Only strip for elements that don't intersect the viewport,
+  // so legitimate visible CJK text keeps its true geometry.
+  function looksLikeProbe(el) {
+    try {
+      if (!el.isConnected) return true;
+      if (!realGBCRforProbe) return false;
+      const r = realGBCRforProbe.call(el);
+      const vw = window.innerWidth || 0, vh = window.innerHeight || 0;
+      return r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh;
+    } catch (_) { return false; }
+  }
+
+  function installFontProtection() {
+    // Canvas measureText (2D + offscreen): measure with CJK families stripped.
+    function patchMeasure(proto) {
+      if (!proto || typeof proto.measureText !== 'function') return;
+      const real = proto.measureText;
+      try {
+        proto.measureText = makeMethod('measureText', 1, function (text) {
+          if (fontActive()) {
+            try {
+              const stripped = stripCJK(this.font);
+              if (stripped != null && stripped !== this.font) {
+                const saved = this.font;
+                if (trySetCanvasFont(this, stripped, saved)) { const m = real.call(this, text); this.font = saved; return m; }
+                this.font = saved;
+              }
+            } catch (_) {}
+          }
+          return real.call(this, text);
+        });
+      } catch (_) {}
+    }
+    if (typeof CanvasRenderingContext2D !== 'undefined') patchMeasure(CanvasRenderingContext2D.prototype);
+    if (typeof OffscreenCanvasRenderingContext2D !== 'undefined') patchMeasure(OffscreenCanvasRenderingContext2D.prototype);
+
+    // DOM width probes set an inline CJK font-family on an off-screen sample and
+    // read its geometry. Strip the CJK family only for such off-screen probe
+    // elements, preserving any !important priority, and never touch visible
+    // content. Normal on-screen elements return their real geometry unchanged.
+    function withStrippedFont(el, read) {
+      if (fontActive() && el && el.style && typeof el.style.fontFamily === 'string') {
+        const fam = el.style.fontFamily;
+        const stripped = stripCJK(fam);
+        if (stripped != null && stripped !== fam && looksLikeProbe(el)) {
+          const prio = el.style.getPropertyPriority('font-family');
+          try {
+            if (stripped) el.style.setProperty('font-family', stripped, prio);
+            else el.style.removeProperty('font-family');
+            const r = read();
+            el.style.setProperty('font-family', fam, prio);
+            return { hit: true, value: r };
+          } catch (_) { try { el.style.setProperty('font-family', fam, prio); } catch (__) {} }
+        }
+      }
+      return { hit: false };
+    }
+    function patchRectMethod(proto, name) {
+      if (!proto || typeof proto[name] !== 'function') return;
+      const real = proto[name];
+      try {
+        proto[name] = makeMethod(name, 0, function () {
+          const res = withStrippedFont(this, () => real.call(this));
+          return res.hit ? res.value : real.call(this);
+        });
+      } catch (_) {}
+    }
+    if (typeof Element !== 'undefined') {
+      patchRectMethod(Element.prototype, 'getBoundingClientRect');
+      patchRectMethod(Element.prototype, 'getClientRects');
+    }
+    function patchOffsetGetter(proto, name) {
+      if (!proto) return;
+      const desc = Object.getOwnPropertyDescriptor(proto, name);
+      if (!desc || !desc.get) return;
+      const realGet = desc.get;
+      try {
+        Object.defineProperty(proto, name, {
+          configurable: true, enumerable: desc.enumerable,
+          get: makeMethod('get ' + name, 0, function () {
+            const res = withStrippedFont(this, () => realGet.call(this));
+            return res.hit ? res.value : realGet.call(this);
+          }),
+        });
+      } catch (_) {}
+    }
+    if (typeof HTMLElement !== 'undefined') {
+      patchOffsetGetter(HTMLElement.prototype, 'offsetWidth');
+      patchOffsetGetter(HTMLElement.prototype, 'offsetHeight');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Web Worker timezone/locale spoofing. Content scripts don't run in worker
+  // scopes, so a fingerprinter reads the real timezone/locale from inside a
+  // Worker. We wrap the Worker constructor and load a small bootstrap (via a
+  // blob) that patches Date/Intl/navigator in worker scope, then importScripts
+  // the original code. Any failure falls back to a normal, unpatched worker so
+  // pages never break; module workers are passed through untouched.
+  // ---------------------------------------------------------------------------
+  function GM_WORKER_PATCH(cfg) {
+    try {
+      var RDTF = Intl.DateTimeFormat, Dp = Date.prototype, TZ = cfg.tz, LOC = cfg.locale, LANGS = cfg.languages;
+      function pad(n) { return ('0' + n).slice(-2); }
+      function off(d) {
+        try {
+          var p = new RDTF('en-US', { timeZone: TZ, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            .formatToParts(d).reduce(function (a, x) { a[x.type] = x.value; return a; }, {});
+          var h = p.hour === '24' ? '00' : p.hour;
+          var w = Date.UTC(+p.year, +p.month - 1, +p.day, +h, +p.minute, +p.second);
+          return -Math.round((w - d.getTime()) / 60000);
+        } catch (e) { return null; }
+      }
+      function wall(d) { var o = off(d); if (o == null) return null; return new Date(d.getTime() - o * 60000); }
+      function nds(d) {
+        try {
+          var p = new RDTF('en-US', { timeZone: TZ, hour12: false, weekday: 'short', year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'long' })
+            .formatToParts(d).reduce(function (a, x) { a[x.type] = x.value; return a; }, {});
+          var r = -off(d), sign = r >= 0 ? '+' : '-', ab = Math.abs(r);
+          var gmt = 'GMT' + sign + pad(Math.floor(ab / 60)) + pad(ab % 60);
+          return { date: p.weekday + ' ' + p.month + ' ' + p.day + ' ' + p.year, time: p.hour + ':' + p.minute + ':' + p.second + ' ' + gmt + ' (' + p.timeZoneName + ')' };
+        } catch (e) { return null; }
+      }
+      if (TZ) {
+        var rTZO = Dp.getTimezoneOffset;
+        Dp.getTimezoneOffset = function getTimezoneOffset() { if (isFinite(this.getTime())) { var o = off(this); if (o != null) return o; } return rTZO.call(this); };
+        var G = { getFullYear: 'getUTCFullYear', getMonth: 'getUTCMonth', getDate: 'getUTCDate', getDay: 'getUTCDay', getHours: 'getUTCHours', getMinutes: 'getUTCMinutes', getSeconds: 'getUTCSeconds', getMilliseconds: 'getUTCMilliseconds' };
+        Object.keys(G).forEach(function (k) { var r = Dp[k], u = G[k]; Dp[k] = function () { if (isFinite(this.getTime())) { var w = wall(this); if (w) return w[u](); } return r.call(this); }; });
+        var strs = { toString: function (s) { return s.date + ' ' + s.time; }, toDateString: function (s) { return s.date; }, toTimeString: function (s) { return s.time; } };
+        Object.keys(strs).forEach(function (k) { var r = Dp[k], pick = strs[k]; Dp[k] = function () { if (isFinite(this.getTime())) { var s = nds(this); if (s) return pick(s); } return r.call(this); }; });
+        var wDTF = function DateTimeFormat() {
+          var l = arguments[0], o = arguments[1];
+          var opts = (o && typeof o === 'object') ? Object.create(o) : {};
+          if (opts.timeZone === undefined) opts.timeZone = TZ;
+          if (l === undefined && LOC) l = LOC;
+          if (new.target) return Reflect.construct(RDTF, [l, opts], new.target);
+          return RDTF(l, opts);
+        };
+        wDTF.prototype = RDTF.prototype;
+        if (RDTF.supportedLocalesOf) wDTF.supportedLocalesOf = RDTF.supportedLocalesOf.bind(RDTF);
+        Intl.DateTimeFormat = wDTF;
+      }
+      if (TZ || LOC) {
+        ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString'].forEach(function (n) {
+          var r = Dp[n];
+          Dp[n] = function (loc, opt) {
+            if (!isFinite(this.getTime())) return r.call(this, loc, opt);
+            var o = (opt && typeof opt === 'object') ? Object.create(opt) : {};
+            if (TZ && o.timeZone === undefined) o.timeZone = TZ;
+            if (LOC && loc === undefined) loc = LOC;
+            return r.call(this, loc, o);
+          };
+        });
+      }
+      if (LOC) {
+        ['NumberFormat', 'Collator', 'PluralRules', 'RelativeTimeFormat', 'ListFormat', 'DisplayNames', 'Segmenter'].forEach(function (n) {
+          var rc = Intl[n]; if (typeof rc !== 'function') return;
+          var w = function () {
+            var inj = (arguments.length === 0 || arguments[0] === undefined);
+            var a = inj ? [LOC].concat([].slice.call(arguments, 1)) : [].slice.call(arguments);
+            if (new.target) return Reflect.construct(rc, a, new.target);
+            return rc.apply(this, a);
+          };
+          w.prototype = rc.prototype; if (rc.supportedLocalesOf) w.supportedLocalesOf = rc.supportedLocalesOf.bind(rc);
+          Intl[n] = w;
+        });
+        try {
+          var np = Object.getPrototypeOf(navigator);
+          Object.defineProperty(np, 'language', { configurable: true, get: function () { return LOC; } });
+          Object.defineProperty(np, 'languages', { configurable: true, get: function () { return Object.freeze((LANGS && LANGS.length ? LANGS : [LOC]).slice()); } });
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+
+  function installWorkerPatch() {
+    if (typeof Worker === 'undefined' || typeof URL === 'undefined' || !URL.createObjectURL || typeof Blob === 'undefined') return;
+    const RealWorker = Worker;
+    const patchSrc = realFnToString.call(GM_WORKER_PATCH);
+    // A CSP that omits blob: (e.g. `script-src 'self'`) blocks a blob worker
+    // ASYNCHRONOUSLY — the constructor doesn't throw, so a try/catch can't catch
+    // it and the worker would silently die. So we never take the blob path until
+    // a one-shot probe worker has CONFIRMED blob workers run here; until then (and
+    // forever, on CSP sites) workers pass through natively — unspoofed but working.
+    let blobAllowed = null; // null unknown, true/false known
+    let probed = false;
+    function probe() {
+      probed = true;
+      try {
+        const u = URL.createObjectURL(new Blob(['self.postMessage(1)'], { type: 'text/javascript' }));
+        const w = new RealWorker(u);
+        const done = (ok) => { blobAllowed = ok; try { w.terminate(); } catch (_) {} try { URL.revokeObjectURL(u); } catch (_) {} };
+        w.onmessage = () => done(true);
+        w.onerror = () => done(false);
+      } catch (_) { blobAllowed = false; }
+    }
+    const wrapped = function Worker(scriptURL, options) {
+      if (!new.target) return RealWorker.apply(this, arguments); // throws like native
+      try {
+        const active = workerActive() && !(options && options.type === 'module');
+        if (active && !probed) probe();
+        if (!active || blobAllowed !== true) return Reflect.construct(RealWorker, arguments, new.target);
+        const cfg = {
+          tz: tzActive() ? cache.timezone : null,
+          locale: langActive() ? cache.locale : null,
+          languages: langActive() ? cache.languages : null,
+        };
+        if (!cfg.tz && !cfg.locale) return Reflect.construct(RealWorker, arguments, new.target);
+        const base = (typeof document !== 'undefined' && document.baseURI) || location.href;
+        const abs = new URL(String(scriptURL), base).href;
+        // Re-base relative importScripts/fetch/XHR against the original script URL
+        // (self.location is the blob URL). self.location reads and dynamic import()
+        // still can't be rebased — hence this feature is opt-in/experimental.
+        const boot =
+          '(' + patchSrc + ')(' + JSON.stringify(cfg) + ');\n' +
+          '(function(){var b=' + JSON.stringify(abs) + ';' +
+          'var i=self.importScripts;if(i){self.importScripts=function(){var a=[].map.call(arguments,function(u){try{return new URL(u,b).href}catch(e){return u}});return i.apply(self,a);};}' +
+          'if(self.fetch){var f=self.fetch;self.fetch=function(u,o){try{if(typeof u==="string")u=new URL(u,b).href;}catch(e){}return f.call(self,u,o);};}' +
+          'if(self.XMLHttpRequest){var xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){try{if(typeof u==="string")u=new URL(u,b).href;}catch(e){}return xo.apply(this,[m,u].concat([].slice.call(arguments,2)));};}' +
+          '})();\n' +
+          'importScripts(' + JSON.stringify(abs) + ');';
+        const url = URL.createObjectURL(new Blob([boot], { type: 'text/javascript' }));
+        const w = Reflect.construct(RealWorker, [url, options], new.target);
+        setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 60000);
+        return w;
+      } catch (_) {
+        try { return Reflect.construct(RealWorker, arguments, new.target); } catch (__) { return new RealWorker(scriptURL, options); }
+      }
+    };
+    finishCtor(wrapped, 'Worker', 1, RealWorker.prototype);
+    try { Object.defineProperty(RealWorker.prototype, 'constructor', { value: wrapped, configurable: true, writable: true }); } catch (_) {}
+    try { Worker = wrapped; } catch (_) {}
+    try { window.Worker = wrapped; } catch (_) {}
+  }
+
+  // ---------------------------------------------------------------------------
   // Install once. Wrappers are inert until override data (`cache`) arrives and
   // the relevant toggle is on, so installing at document_start is safe.
   // ---------------------------------------------------------------------------
   installTimezone();
   installLocale();
-  if (typeof Reflect !== 'undefined' && Reflect.construct) installDateConstructor();
+  installFontProtection();
+  if (typeof Reflect !== 'undefined' && Reflect.construct) { installDateConstructor(); installWorkerPatch(); }
 
   // ---------------------------------------------------------------------------
   // Data channel with the isolated bridge via window.postMessage (structured

@@ -55,6 +55,8 @@ function render({ state, override, settings }) {
   $('tzEnabled').checked = settings ? settings.tzEnabled !== false : true;
   $('langEnabled').checked = settings ? settings.langEnabled !== false : true;
   $('webrtcProtect').checked = settings ? settings.webrtcProtect !== false : true;
+  $('fontEnabled').checked = settings ? settings.fontEnabled !== false : true;
+  $('workerEnabled').checked = settings ? settings.workerEnabled !== false : true;
   if (settings) {
     $('accuracyM').value = settings.accuracyM;
     $('refreshMinutes').value = settings.refreshMinutes;
@@ -84,6 +86,8 @@ bind('enabled', 'enabled');
 bind('tzEnabled', 'tzEnabled');
 bind('langEnabled', 'langEnabled');
 bind('webrtcProtect', 'webrtcProtect');
+bind('fontEnabled', 'fontEnabled');
+bind('workerEnabled', 'workerEnabled');
 bind('accuracyM', 'accuracyM', (v) => Math.max(5, Math.min(500, +v || 30)));
 bind('refreshMinutes', 'refreshMinutes', (v) => Math.max(30, Math.min(10080, +v || 360)));
 bind('ipToken', 'ipToken', (v) => (v || '').trim());

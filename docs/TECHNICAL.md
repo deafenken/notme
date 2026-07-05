@@ -21,6 +21,8 @@ The extension currently spoofs:
 - `Number`/`Array`/`BigInt.prototype.toLocaleString`
 - outgoing `Accept-Language` header on all resource types via Chrome `declarativeNetRequest`
 - WebRTC IP-handling policy (optional, via `chrome.privacy`) so ICE candidates can't bypass the proxy
+- timezone + locale inside dedicated Web Workers (optional; see below)
+- CJK font width probing on canvas `measureText` and DOM `getBoundingClientRect`/`getClientRects`/`offsetWidth`/`offsetHeight` (optional; see below)
 - `Function.prototype.toString` (so spoofed functions read as native)
 
 ## Runtime flow
@@ -84,11 +86,57 @@ This forces WebRTC to use the proxy path; if the proxy has no UDP relay, WebRTC
 media fails to connect rather than leaking the real IP. Extension-controlled
 privacy settings revert automatically when GeoMirror is disabled or removed.
 
+## Web Worker spoofing ("Spoof in Web Workers" toggle — experimental, default OFF)
+
+Content scripts don't run inside worker scopes, so a fingerprinter can read the
+real timezone/locale from a `new Worker(...)`. When enabled, GeoMirror wraps the
+`Worker` constructor: for a classic dedicated worker it builds a small blob whose
+body (1) runs a self-contained patch of `Date` (offset, local getters, string
+methods, `toLocale*`) / `Intl` / `navigator` for the spoofed zone/locale,
+(2) rewrites `importScripts`, `fetch`, and `XMLHttpRequest.open` to resolve
+relative URLs against the original script URL, then (3) `importScripts` the
+original script.
+
+This is **off by default and experimental** because rewriting a worker through a
+blob has boundaries a shim can't fully paper over:
+
+- **CSP.** A policy that omits `blob:` (e.g. `script-src 'self'`) blocks the blob
+  worker *asynchronously* — the constructor doesn't throw, so a try/catch can't
+  catch it. To avoid silently killing the worker, GeoMirror runs a one-shot probe
+  worker and only takes the blob path once blob workers are **confirmed** to run
+  on the page; until then (and permanently on CSP-restricted pages) workers pass
+  through natively (unspoofed but working).
+- **`self.location`.** Inside the blob worker it is the blob URL. Workers that
+  derive resource URLs from `self.location`, or use dynamic `import()`, can
+  misbehave — this can't be rebased, which is why the feature is opt-in.
+- Module workers (`{type:'module'}`), `SharedWorker`, `ServiceWorker`, and
+  Worklets are passed through / not wrapped.
+- The in-worker patch spoofs the timezone/locale *values*; it does not fully
+  harden native-identity (`Function.prototype.toString`) inside the worker.
+
+Any failure falls back to a normal, unpatched worker, so pages don't break — but
+if a specific site's worker misbehaves, turn the toggle off.
+
+## Font hiding ("Hide CJK fonts" toggle)
+
+Width-based font probes render a string in `"'TestFont', <generic>"` and compare
+the measured width against the generic baseline; an installed font shifts the
+width. GeoMirror patches `CanvasRenderingContext2D.measureText` (and the
+offscreen variant) plus `Element.getBoundingClientRect`/`getClientRects` and
+`HTMLElement.offsetWidth`/`offsetHeight`: when the measured font-family names a
+blacklisted CJK font (Microsoft YaHei, PingFang, SimSun, SimHei, KaiTi, MingLiU,
+Source Han / Noto CJK, …, both Simplified and Traditional), those families are
+stripped before measuring, so the probe reads the generic baseline and concludes
+the font is not installed. This hides the OS/region signal (a Windows/macOS
+Chinese font set contradicting, say, a Los Angeles exit IP). The DOM path only
+acts on elements that declare a CJK font inline, so normal layout is untouched.
+
 ## Limitations
 
-- This is browser-surface alignment, not a full anti-fingerprinting system (canvas/WebGL/fonts/audio/UA are intentionally untouched).
+- This is browser-surface alignment, not a full anti-fingerprinting system (canvas image/WebGL/audio/UA are intentionally untouched; only CJK-font width probing is addressed).
 - Locale inference is heuristic; provider timezone quality depends on the IP geolocation provider.
-- **Worker scopes are not covered.** Content scripts run in the page's main world, not inside Web/Shared/Service Workers or Worklets. `Date`/`Intl` read inside a worker still reflect the host zone. Rewriting worker source to inject patches would break cross-origin and relative-import/module workers, so it is deliberately not attempted.
+- Worker coverage is limited to classic dedicated workers (see above); Shared/Service Workers and Worklets still read the host zone.
+- Font hiding targets width probes; it does not alter canvas *pixel* readback (`toDataURL`/`getImageData`) fingerprints, and DOM probes that set the font via a CSS class rather than inline style are not covered.
 - Extensions cannot inject into `chrome://` / `edge://`, the extension stores, or other privileged pages.
 - Some platforms use high-entropy or non-browser signals (TLS/HTTP fingerprints, account history) that an extension cannot modify.
 
